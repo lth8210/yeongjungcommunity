@@ -1,7 +1,7 @@
-name: Deploy to Firebase Hosting on PR
+name: Deploy to Firebase Hosting on Push
 
 on:
-  pull_request:
+  push:
     branches:
       - main
 
@@ -24,5 +24,5 @@ jobs:
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_YEONGJUNGCOMMUNITY }}'
-          channelId: pr-${{ github.event.pull_request.number }}
+          channelId: live
           projectId: yeongjungcommunity
