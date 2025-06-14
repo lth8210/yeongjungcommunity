@@ -1,0 +1,69 @@
+/* src/components/ChatCreateModal.css */
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group input[type="number"] {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-sizing: border-box; /* 패딩과 테두리가 너비에 포함되도록 설정 */
+}
+
+/* ✅ 체크박스 정렬 문제를 해결하는 핵심 부분 */
+.checkbox-group {
+    display: flex;
+    justify-content: space-between; /* 양쪽 끝으로 정렬 */
+    align-items: center; /* 수직 중앙 정렬 */
+    padding: 12px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+}
+
+.checkbox-group label {
+    font-size: 16px;
+    color: #555;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: 20px; /* 크기 지정 */
+    height: 20px; /* 크기 지정 */
+    cursor: pointer;
+}
+
+.modal-actions {
+    margin-top: 24px;
+    text-align: right;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.modal-actions button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.button-primary {
+    background-color: #0d6efd;
+    color: white;
+}
+
+.button-secondary {
+    background-color: #e9ecef;
+    color: #333;
+}
+
+@media (max-width: 480px) {
+  .modal-actions button {
+    width: 100%;
+  }
+}

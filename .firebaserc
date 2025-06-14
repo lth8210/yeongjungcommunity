@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "yeongjungcommunity"
+  },
+  "targets": {
+    "yeongjungcommunity": {
+      "hosting": {
+        "default": [
+          "yeongjungcommunity"
+        ]
+      }
+    }
+  }
+}
