@@ -658,23 +658,32 @@ button:disabled {
 
 /* 참여자 목록 */
 .participant-list-horizontal {
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #dee2e6;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+  border-radius: 8px;
+  margin: 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
 .participant-list-horizontal strong {
-    margin-right: 5px;
+  margin-right: 10px;
+  font-size: 16px;
 }
+
 .participant-list-horizontal span {
-    padding: 4px 10px;
-    background: #e9ecef;
-    border-radius: 20px;
-    cursor: pointer;
-    font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #fffbe6;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 16px;
+  font-weight: 500;
+  margin-right: 10px;
+  cursor: default;
 }
 
 /* 투표/채팅방 생성 폼 체크박스 정렬 */
@@ -832,4 +841,44 @@ button:disabled {
   .chat-input input, .chat-input button {
     width: 100%;
   }
+}
+
+.participant-list-horizontal span > span:first-child {
+  background-color: #ffeb3b;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.participant-list-horizontal button {
+  margin-left: 6px;
+  color: #fff;
+  background-color: #dc3545;
+  border: none;
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.modal-backdrop {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-content {
+  background: #fff;
+  border-radius: 10px;
+  padding: 24px 20px;
+  min-width: 320px;
+  max-width: 95vw;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.18);
 }

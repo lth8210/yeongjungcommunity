@@ -4,26 +4,13 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import {
-  collection,
-  query,
-  orderBy,
-  onSnapshot,
-  addDoc,
-  serverTimestamp,
-  doc,
-  updateDoc,
-  getDoc,
-  getDocs,
-  where,
-  setDoc,
-  deleteDoc,
-  Timestamp
+  collection, query, orderBy, onSnapshot, addDoc, serverTimestamp,
+  doc, updateDoc, getDoc, getDocs, where, setDoc, deleteDoc, Timestamp
 } from 'firebase/firestore';
 import { Picker } from 'emoji-mart';
 import Modal from 'react-modal';
 
-// Modal의 root element 설정 (웹 접근성 경고 방지)
-Modal.setAppElement('#root');
+Modal.setAppElement('#root'); //
 
 const ChatRoomPage = ({ userInfo }) => {
   const { roomId } = useParams();
@@ -48,8 +35,10 @@ const ChatRoomPage = ({ userInfo }) => {
   const [inviteTab, setInviteTab] = useState('search');
   const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
   const [isJoining, setIsJoining] = useState(false);
-  const [showParticipants, setShowParticipants] = useState(false); // 참여자 보기 토글
+  const [showParticipants, setShowParticipants] = useState(false);
   const [creatingPoll, setCreatingPoll] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
   const [newPoll, setNewPoll] = useState({
     title: '',
     options: ['', ''],
@@ -66,7 +55,7 @@ const ChatRoomPage = ({ userInfo }) => {
     fontSize: '14px'
   };
 
-  // --- useEffect Hooks ---
+  // --- 실시간 데이터 구독 및 상태 관리 ---
   useEffect(() => {
     if (!roomId) return;
     const roomDocRef = doc(db, "chatRooms", roomId);
@@ -88,26 +77,26 @@ const ChatRoomPage = ({ userInfo }) => {
         [`lastRead.${currentUser.uid}`]: new Date()
       }).catch(() => {});
     }
-  }, [roomId, currentUser, roomInfo]);
+  }, [roomId, currentUser, roomInfo?.participants, messages]);
 
   useEffect(() => {
-    if (!roomId) return;
-    const q = query(collection(db, "chatRooms", roomId, "messages"), orderBy("createdAt"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const newMessages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-        if (document.hidden && newMessages.length > messages.length) {
-            const lastMessage = newMessages[newMessages.length - 1];
-            if (lastMessage.uid !== currentUser?.uid && notificationPermission === 'granted') {
-                new Notification(roomInfo?.roomName || '새 메시지', {
-                    body: `${lastMessage.userName}: ${lastMessage.text}`,
-                    tag: roomId,
-                });
-            }
-        }
-        setMessages(newMessages);
-    }, (err) => console.error(err));
-    return () => unsubscribe();
-  }, [roomId, messages, notificationPermission, roomInfo, currentUser]);
+  if (!roomId) return;
+  const q = query(collection(db, "chatRooms", roomId, "messages"), orderBy("createdAt"));
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const newMessages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+    if (document.hidden && newMessages.length > messages.length) {
+      const lastMessage = newMessages[newMessages.length - 1];
+      if (lastMessage.uid !== currentUser?.uid && notificationPermission === 'granted') {
+        new Notification(roomInfo?.roomName || '새 메시지', {
+          body: `${lastMessage.userName}: ${lastMessage.text}`,
+          tag: roomId,
+        });
+      }
+    }
+    setMessages(newMessages);
+  }, (err) => console.error(err));
+  return () => unsubscribe();
+}, [roomId, notificationPermission, roomInfo, currentUser]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -128,75 +117,85 @@ const ChatRoomPage = ({ userInfo }) => {
   }, [messages]);
 
   useEffect(() => {
-    const fetchRoomInfo = async () => {
-      try {
-        const roomRef = doc(db, 'chatRooms', roomId);
-        const roomSnap = await getDoc(roomRef);
+  if (!roomId || !currentUser || !db) return; // 초기화 확인
 
-        if (!roomSnap.exists()) {
-          alert('채팅방이 존재하지 않습니다.');
-          navigate('/chat');
-          return;
-        }
+  const fetchRoomInfo = async () => {
+    try {
+      const roomRef = doc(db, 'chatRooms', roomId);
+      const roomSnap = await getDoc(roomRef);
+      if (!roomSnap.exists()) {
+        alert('채팅방이 존재하지 않습니다.');
+        navigate('/chat');
+        return;
+      }
+      const data = roomSnap.data();
+      const isParticipant = data.participants?.includes(currentUser.uid);
+      const isCreator = data.createdBy === currentUser.uid;
 
-        const data = roomSnap.data();
-        const isParticipant = data.participants?.includes(currentUser.uid);
-        const isCreator = data.createdBy === currentUser.uid;
-
-        if (!isParticipant && !isCreator) {
-          if (data.isPrivate) {
-            const inputPassword = prompt("이 채팅방은 비공개입니다. 비밀번호를 입력하세요:");
-            if (inputPassword !== data.password) {
-              alert("비밀번호가 일치하지 않습니다.");
-              navigate('/chat');
-              return;
-            }
-          } else {
-            alert("초대 수락 후 입장할 수 있습니다.");
+      if (!isParticipant && !isCreator) {
+        if (data.isPrivate) {
+          const inputPassword = prompt("이 채팅방은 비공개입니다. 비밀번호를 입력하세요:");
+          if (inputPassword === null) {
+            alert("입장이 취소되었습니다.");
             navigate('/chat');
             return;
           }
+          if (inputPassword !== data.password) {
+            alert("비밀번호가 일치하지 않습니다.");
+            navigate('/chat');
+            return;
+          }
+        } else {
+          alert("초대 수락 후 입장할 수 있습니다.");
+          navigate('/chat');
+          return;
         }
-
-        setRoomInfo(data);
-
-        await updateDoc(roomRef, {
-          [`lastRead.${currentUser.uid}`]: new Date()
-        });
-      } catch (err) {
-        console.error("채팅방 정보 불러오기 실패:", err);
-        alert("채팅방 입장 중 오류가 발생했습니다.");
-        navigate('/chat');
       }
-    };
+      setRoomInfo(data);
+      await updateDoc(roomRef, {
+        [`lastRead.${currentUser.uid}`]: new Date()
+      });
+    } catch (err) {
+      console.error("채팅방 정보 불러오기 실패:", err);
+      alert("채팅방 입장 중 오류가 발생했습니다.");
+      navigate('/chat');
+    }
+  };
 
-    fetchRoomInfo();
-  }, [roomId, currentUser, navigate]);
+  fetchRoomInfo();
+}, [roomId, currentUser, navigate, db, setRoomInfo]); // 의존성 추가
 
   useEffect(() => {
-    if (Notification.permission !== 'granted') {
-      Notification.requestPermission().then(permission => setNotificationPermission(permission));
-    }
-
-    const handlePopState = () => {
+  if (!('Notification' in window)) { // 알림 지원 확인 추가
+    console.warn('이 브라우저는 알림을 지원하지 않습니다.');
+    return;
+  }
+  if (Notification.permission !== 'granted') {
+    Notification.requestPermission().then(permission => {
+      setNotificationPermission(permission);
+    });
+  }
+  const handlePopState = () => {
+    if (window.history.state?.modal !== 'open') { // 팝업이 열려 있지 않으면 모두 닫기
       setShowMenu(false);
       setShowNoticeModal(false);
       setShowPollModal(false);
       setShowInviteModal(false);
       setSelectedUser(null);
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+      setShowParticipants(false);
+    }
+  };
+  window.addEventListener('popstate', handlePopState);
+  return () => window.removeEventListener('popstate', handlePopState);
+}, []);
 
   // --- Helper Functions ---
   const closeModal = (setFunction) => {
-    if (window.history.state !== null) {
-      window.history.back();
-    }
-    setFunction(false);
-  };
-  
+  setFunction(false);
+  if (window.history.state?.modal === 'open') { // 상태가 'open'인지 확인
+    window.history.back();
+  }
+};
   const openModalWithHistory = (setFunction) => {
     window.history.pushState({ modal: 'open' }, '', window.location.href);
     setFunction(true);
@@ -205,7 +204,7 @@ const ChatRoomPage = ({ userInfo }) => {
   const handleEmojiSelect = (emoji) => {
     setNewMessage(prev => prev + emoji.native);
   };
-  
+
   // --- Event Handlers ---
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -214,7 +213,9 @@ const ChatRoomPage = ({ userInfo }) => {
       await addDoc(collection(db, "chatRooms", roomId, "messages"), { text: newMessage, createdAt: serverTimestamp(), uid: currentUser.uid, userName: userInfo.nickname });
       await updateDoc(doc(db, "chatRooms", roomId), { lastMessage: newMessage, updatedAt: serverTimestamp(), [`lastRead.${currentUser.uid}`]: new Date() });
       setNewMessage('');
-    } catch (err) { console.error("메시지 전송 오류:", err); }
+      // 피드백 메시지: 메시지 전송 성공
+      // alert("메시지가 전송되었습니다!");
+    } catch (err) { console.error("메시지 전송 오류:", err); alert("메시지 전송 중 오류가 발생했습니다."); }
   };
 
   const handleUserClick = async (uid) => {
@@ -228,15 +229,30 @@ const ChatRoomPage = ({ userInfo }) => {
 
   // ✅ 강퇴 기능: 방장/운영자만 사용 가능
   const handleBanUser = async (banUid, banName) => {
-    if (!window.confirm(`${banName}님을 강퇴하시겠습니까?`)) return;
-    const roomRef = doc(db, "chatRooms", roomId);
+  if (roomInfo.createdBy !== currentUser.uid) { // 방장인지 확인
+    alert("강퇴 권한이 없습니다. 방장만 강퇴할 수 있습니다.");
+    return;
+  }
+  if (!window.confirm(`${banName}님을 강퇴하시겠습니까?`)) return;
+  const roomRef = doc(db, "chatRooms", roomId);
+  try {
+    const index = roomInfo.participants.indexOf(banUid);
+    if (index === -1) {
+      alert("사용자를 찾을 수 없습니다.");
+      return;
+    }
     await updateDoc(roomRef, {
       [`bannedUsers.${banUid}`]: { bannedAt: serverTimestamp(), bannedBy: currentUser.uid },
       participants: roomInfo.participants.filter(uid => uid !== banUid),
-      participantNames: roomInfo.participantNames.filter((_, i) => roomInfo.participants[i] !== banUid),
-      participantNicknames: roomInfo.participantNicknames.filter((_, i) => roomInfo.participants[i] !== banUid),
+      participantNames: roomInfo.participantNames.filter((_, i) => i !== index),
+      participantNicknames: roomInfo.participantNicknames.filter((_, i) => i !== index),
     });
-  };
+    alert(`${banName}님을 강퇴했습니다.`);
+  } catch (err) {
+    console.error("강퇴 오류:", err);
+    alert("강퇴 중 오류가 발생했습니다.");
+  }
+};
 
   // ✅ 강퇴된 유저는 즉시 퇴장
   useEffect(() => {
@@ -261,7 +277,7 @@ const ChatRoomPage = ({ userInfo }) => {
       });
       alert("채팅방에서 나갔습니다.");
       navigate("/chat");
-    } catch (err) { console.error("채팅방 나가기 오류:", err); }
+    } catch (err) { console.error("채팅방 나가기 오류:", err); alert("채팅방 나가기 중 오류가 발생했습니다."); }
   };
 
   const handleAddNotice = async () => {
@@ -269,7 +285,8 @@ const ChatRoomPage = ({ userInfo }) => {
     try {
       await addDoc(collection(db, "chatRooms", roomId, "announcements"), { ...newNotice, createdAt: serverTimestamp(), createdBy: currentUser.uid, createdByName: userInfo.nickname });
       setNewNotice({ title: '', content: '' });
-    } catch (err) { console.error("공지 등록 오류:", err); }
+      alert("공지 등록이 완료되었습니다.");
+    } catch (err) { console.error("공지 등록 오류:", err); alert("공지 등록 중 오류가 발생했습니다."); }
   };
 
   const handleSearchUsers = async () => {
@@ -285,7 +302,7 @@ const ChatRoomPage = ({ userInfo }) => {
     try {
       await setDoc(invitationRef, { uid, nickname, invitedBy: currentUser.uid, invitedByName: userInfo.nickname, createdAt: serverTimestamp() });
       alert(`${nickname}님에게 초대장을 보냈습니다.`);
-    } catch (err) { console.error("초대 오류:", err); }
+    } catch (err) { console.error("초대 오류:", err); alert("초대 중 오류가 발생했습니다."); }
   };
 
   const handleCreatePoll = async () => {
@@ -299,7 +316,8 @@ const ChatRoomPage = ({ userInfo }) => {
       });
       setNewPoll({ title: '', options: ['', ''], deadline: '', allowMultiple: false, isSecret: false, isAnonymous: false });
       setCreatingPoll(false);
-    } catch (err) { console.error("투표 생성 오류:", err); }
+      alert("투표가 등록되었습니다!");
+    } catch (err) { console.error("투표 생성 오류:", err); alert("투표 등록 중 오류가 발생했습니다."); }
   };
 
   const handleVote = async (poll, option) => {
@@ -311,7 +329,8 @@ const ChatRoomPage = ({ userInfo }) => {
     } else {
       newVotes = myVotes.includes(option) ? [] : [option];
     }
-    await updateDoc(pollRef, { [`votes.${currentUser.uid}`]: newVotes }).catch(err => console.error("투표하기 오류: ", err));
+    await updateDoc(pollRef, { [`votes.${currentUser.uid}`]: newVotes }).catch(err => { console.error("투표하기 오류: ", err); alert("투표 중 오류가 발생했습니다."); });
+    alert("투표가 반영되었습니다.");
   };
 
   const handleDeleteRoom = async () => {
@@ -321,7 +340,7 @@ const ChatRoomPage = ({ userInfo }) => {
         await deleteDoc(doc(db, "chatRooms", roomId));
         alert("채팅방이 삭제되었습니다.");
         navigate("/chat");
-      } catch (error) { console.error("채팅방 삭제 오류: ", error); }
+      } catch (error) { console.error("채팅방 삭제 오류: ", error); alert("채팅방 삭제 중 오류가 발생했습니다."); }
     }
   };
 
@@ -353,26 +372,60 @@ const ChatRoomPage = ({ userInfo }) => {
 
   // 참여자가 아닌 경우, 입장 조건 확인 로직
   if (!roomInfo || !roomInfo.participants?.includes(currentUser.uid)) {
-    const handleEntryCheck = () => {
-      if (!roomInfo) return <BlockedScreen message="존재하지 않는 채팅방입니다." />;
-      if (roomInfo.maxParticipants && roomInfo.participants.length >= roomInfo.maxParticipants) {
-        return <BlockedScreen message="채팅방 정원이 가득 찼습니다." />;
-      }
-      if (roomInfo.isPrivate && !roomInfo.participants?.includes(currentUser.uid)) {
-        const inputPassword = prompt("이 채팅방은 비공개입니다. 비밀번호를 입력하세요:");
-        if (inputPassword === null) return <BlockedScreen message="입장이 취소되었습니다." />;
-        if (inputPassword !== roomInfo.password) {
-          alert("비밀번호가 일치하지 않습니다.");
-          return <BlockedScreen message="비밀번호가 일치하지 않습니다." />;
-        }
-        handleJoinRoom();
-        return null;
-      }
-      if (!roomInfo.isPrivate && !roomInfo.participants.includes(currentUser.uid)) {
-        return <BlockedScreen message="초대 후 입장할 수 있는 채팅방입니다." />;
-      }
-      return <BlockedScreen message="아직 이 채팅방에 참여하지 않았습니다." />;
-    };
+    // 상태 변수 추가 (src/pages/ChatRoomPage.js, 약 50줄, 다른 상태들 아래)
+
+// handleEntryCheck 함수 수정 (src/pages/ChatRoomPage.js, 약 350줄)
+const handleEntryCheck = () => {
+  if (!roomInfo) return <BlockedScreen message="존재하지 않는 채팅방입니다." />;
+  if (roomInfo.maxParticipants && roomInfo.participants.length >= roomInfo.maxParticipants) {
+    return <BlockedScreen message="채팅방 정원이 가득 찼습니다." />;
+  }
+  if (roomInfo.isPrivate && !roomInfo.participants?.includes(currentUser.uid)) {
+    return (
+      <Modal
+        isOpen={true}
+        onRequestClose={() => navigate('/chat')}
+        style={{
+          overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 },
+          content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '300px', padding: '20px', borderRadius: '10px' }
+        }}
+      >
+        <h3>비공개 채팅방</h3>
+        <p>비밀번호를 입력하세요:</p>
+        <input
+          type="password"
+          value={passwordInput}
+          onChange={(e) => setPasswordInput(e.target.value)}
+          style={{ width: '100%', padding: '8px', marginBottom: '10px' }}
+          aria-label="비밀번호 입력"
+        />
+        <button
+          onClick={async () => {
+            if (passwordInput === roomInfo.password) {
+              await handleJoinRoom();
+              setShowPasswordModal(false);
+            } else {
+              alert("비밀번호가 일치하지 않습니다.");
+            }
+          }}
+          style={{ padding: '8px 12px', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+        >
+          확인
+        </button>
+        <button
+          onClick={() => navigate('/chat')}
+          style={{ marginLeft: '10px', padding: '8px 12px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+        >
+          취소
+        </button>
+      </Modal>
+    );
+  }
+  if (!roomInfo.isPrivate && !roomInfo.participants.includes(currentUser.uid)) {
+    return <BlockedScreen message="초대 후 입장할 수 있는 채팅방입니다." />;
+  }
+  return <BlockedScreen message="아직 이 채팅방에 참여하지 않았습니다." />;
+};
     return handleEntryCheck();
   }
 
@@ -382,64 +435,111 @@ const ChatRoomPage = ({ userInfo }) => {
     <div className="chat-page">
       {/* --- 채팅방 헤더 --- */}
       <div className="chat-header">
-        <Link to="/chat" className='back-to-list-link'>←</Link>
+        <Link to="/chat" className='back-to-list-link' aria-label="채팅 목록으로 돌아가기">←</Link>
         <h2>{chatTitle}</h2>
         <button className="menu-toggle" onClick={() => openModalWithHistory(setShowMenu)}
-          style={{ marginLeft: 'auto', background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }}>☰</button>
+          style={{ marginLeft: 'auto', background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer' }} aria-label="채팅방 메뉴 열기">☰</button>
       </div>
-
-      {/* --- 참여자 목록: 메뉴에서 '참여자 보기' 클릭 시에만 보임, 방장만 강퇴 가능 --- */}
-      {showParticipants && roomInfo?.participantNames?.length > 0 && (
-        <div className="participant-list-horizontal" style={{ padding: '8px 12px', background: '#fff', borderBottom: '1px solid #ddd', display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
-          <strong>참여자:</strong>
-          {roomInfo.participantNames.map((name, idx) => (
-            <span key={idx} style={{ padding: '4px 10px', background: '#f0f0f0', borderRadius: '20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span onClick={() => handleUserClick(roomInfo.participants?.[idx])}>{name}</span>
-              {roomInfo.createdBy === currentUser.uid && roomInfo.participants[idx] !== currentUser.uid && (
-                <button
-                  style={{ marginLeft: '5px', color: 'red', border: 'none', background: 'none', cursor: 'pointer' }}
-                  onClick={() => handleBanUser(roomInfo.participants[idx], name)}
-                >강퇴</button>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
 
       {/* --- 메뉴(공지, 투표, 참여자 보기, 초대, 나가기, 삭제) --- */}
       {showMenu && (
         <div className="chat-menu-dropdown">
-          <button onClick={() => closeModal(setShowMenu)} className="close-menu-btn">×</button>
+          <button onClick={() => closeModal(setShowMenu)} className="close-menu-btn" aria-label="메뉴 닫기">×</button>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
             <li style={menuItemStyle} onClick={() => { openModalWithHistory(setShowNoticeModal); setShowMenu(false); }}>
               <span>📢</span>
               <span>공지 보기</span>
+              <div className="help-text" style={{ fontSize: '13px', color: '#888' }}>채팅방의 공지사항을 확인하고 새 공지를 등록할 수 있습니다.</div>
             </li>
             <li style={menuItemStyle} onClick={() => { openModalWithHistory(setShowPollModal); setShowMenu(false); }}>
               <span>🗳️</span>
               <span>투표 보기</span>
+              <div className="help-text" style={{ fontSize: '13px', color: '#888' }}>채팅방 내 투표를 확인하고 참여할 수 있습니다.</div>
             </li>
-            <li style={menuItemStyle} onClick={() => { setShowParticipants(p => !p); closeModal(setShowMenu); }}>
-              <span>👥</span>
-              <span>참여자 보기</span>
+            <li style={menuItemStyle} onClick={() => setShowParticipants(true)} aria-label="채팅방 참여자 목록 열기" title="채팅방에 참여 중인 사람을 확인할 수 있습니다.">
+              <span role="img" aria-label="참여자">👥</span>
+              참여자 보기
+              <div className="help-text" style={{ fontSize: '13px', color: '#888' }}>채팅방에 함께 참여 중인 사람들입니다.</div>
             </li>
             <li style={menuItemStyle} onClick={() => { openModalWithHistory(setShowInviteModal); setShowMenu(false); }}>
               <span>➕</span>
               <span>초대하기</span>
+              <div className="help-text" style={{ fontSize: '13px', color: '#888' }}>다른 사용자를 채팅방에 초대할 수 있습니다.</div>
             </li>
             <li style={{...menuItemStyle, color: 'red'}} onClick={() => { closeModal(setShowMenu); handleLeaveRoom(); }}>
               <span>🚪</span>
               <span>채팅방 나가기</span>
+              <div className="help-text" style={{ fontSize: '13px', color: '#888' }}>채팅방에서 나가면 다시 초대를 받아야 입장할 수 있습니다.</div>
             </li>
             {roomInfo.createdBy === currentUser.uid && (
               <li style={{ ...menuItemStyle, color: 'red', borderTop: '1px solid #f00' }} onClick={() => { closeModal(setShowMenu); handleDeleteRoom(); }}>
                 <span>🗑️</span>
                 <span>채팅방 삭제</span>
+                <div className="help-text" style={{ fontSize: '13px', color: '#888' }}>채팅방을 완전히 삭제합니다. 되돌릴 수 없습니다.</div>
               </li>
             )}
           </ul>
         </div>
       )}
+
+      {/* --- 참여자 목록: 카카오톡처럼 하단 모달/슬라이드로 오버레이 --- */}
+      <Modal
+  isOpen={showParticipants}
+  onRequestClose={() => setShowParticipants(false)}
+  style={{
+    overlay: { backgroundColor: 'rgba(0,0,0,0.15)', zIndex: 1100 },
+    content: {
+      top: '70px', // 헤더 높이만큼 아래
+      right: '0',
+      left: 'auto',
+      bottom: 'auto',
+      width: '320px',
+      height: 'calc(100vh - 90px)',
+      borderRadius: '16px 0 0 16px',
+      padding: '24px 18px 18px 18px',
+      boxShadow: '0 2px 16px rgba(0,0,0,0.12)',
+      overflow: 'auto',
+      margin: 0,
+      position: 'fixed',
+      background: '#fff'
+    }
+  }}
+  contentLabel="참여자 목록"
+>
+  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+    <strong style={{fontSize:'16px'}}>참여자 목록</strong>
+    <button onClick={() => setShowParticipants(false)} style={{fontSize:'20px', background:'none', border:'none', cursor:'pointer'}}>×</button>
+  </div>
+  <div style={{fontSize:'13px', color:'#888', marginBottom:'12px'}}>
+    채팅방에 함께 참여 중인 사람들입니다.
+  </div>
+  <div style={{maxHeight:'70vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:'8px'}}>
+    {roomInfo?.participantNames?.map((name, idx) => (
+      <span key={idx} style={{
+        display: 'flex', alignItems: 'center', gap: '6px',
+        background: '#fffbe6', borderRadius: '20px', padding: '6px 12px',
+        fontSize: '15px', fontWeight: 500, marginBottom: '8px'
+      }}>
+        <span style={{
+          background: '#ffeb3b', borderRadius: '50%', width: '26px', height: '26px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontWeight: 'bold', fontSize: '14px'
+        }}>
+          {name.slice(0,2)}
+        </span>
+        <span style={{wordBreak:'break-all'}}>{name} ({roomInfo.participantNicknames?.[idx] || '닉네임 없음'})</span>
+        {roomInfo.createdBy === currentUser.uid && roomInfo.participants[idx] !== currentUser.uid && (
+          <button
+            style={{marginLeft:'6px', color:'#fff', background:'#dc3545', border:'none', borderRadius:'12px', padding:'2px 10px', fontSize:'13px', cursor:'pointer'}}
+            onClick={() => handleBanUser(roomInfo.participants[idx], name)}
+            aria-label={`${name} 강퇴`}
+            type="button"
+          >강퇴</button>
+        )}
+      </span>
+    ))}
+  </div>
+</Modal>
 
       {/* --- 채팅 메시지 --- */}
       <div className="chat-box">
@@ -456,9 +556,9 @@ const ChatRoomPage = ({ userInfo }) => {
       <div className="chat-input-container">
         {showEmojiPicker && <div className="emoji-picker-wrapper"><Picker onSelect={handleEmojiSelect} /></div>}
         <form onSubmit={handleSendMessage} className="message-form">
-          <button type="button" className="emoji-button" onClick={() => setShowEmojiPicker(p => !p)}>😀</button>
-          <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="메시지를 입력하세요..." />
-          <button type="submit">전송</button>
+          <button type="button" className="emoji-button" onClick={() => setShowEmojiPicker(p => !p)} aria-label="이모지 선택">😀</button>
+          <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="메시지를 입력하세요... (예: 안녕하세요!)" aria-label="메시지 입력" />
+          <button type="submit" aria-label="메시지 전송">전송</button>
         </form>
       </div>
 
@@ -486,8 +586,8 @@ const ChatRoomPage = ({ userInfo }) => {
           </ul>
           <hr />
           <h4>새 공지 등록</h4>
-          <input type="text" placeholder="제목" value={newNotice.title} onChange={(e) => setNewNotice(p => ({ ...p, title: e.target.value }))} style={{ width: '100%', marginBottom: '8px', padding: '8px', boxSizing: 'border-box' }} />
-          <textarea placeholder="내용" value={newNotice.content} onChange={(e) => setNewNotice(p => ({ ...p, content: e.target.value }))} rows={3} style={{ width: '100%', marginBottom: '8px', padding: '8px', boxSizing: 'border-box' }} />
+          <input type="text" placeholder="제목 (예: 6월 모임 안내)" value={newNotice.title} onChange={(e) => setNewNotice(p => ({ ...p, title: e.target.value }))} style={{ width: '100%', marginBottom: '8px', padding: '8px', boxSizing: 'border-box' }} aria-label="공지 제목 입력" />
+          <textarea placeholder="내용 (예: 6월 모임은 6/25 15시에 진행됩니다.)" value={newNotice.content} onChange={(e) => setNewNotice(p => ({ ...p, content: e.target.value }))} rows={3} style={{ width: '100%', marginBottom: '8px', padding: '8px', boxSizing: 'border-box' }} aria-label="공지 내용 입력" />
           <button onClick={handleAddNotice} style={{ background: '#0d6efd', color: '#fff', padding: '8px 12px', border: 'none', cursor: 'pointer', borderRadius: '4px' }}>등록</button>
         </div>
         <button onClick={() => closeModal(setShowNoticeModal)} style={{ marginTop: '15px', background: '#6c757d', color: '#fff', padding: '8px 12px', cursor: 'pointer', border: 'none', borderRadius: '4px', alignSelf: 'flex-end', flexShrink: 0 }}>닫기</button>
@@ -550,24 +650,25 @@ const ChatRoomPage = ({ userInfo }) => {
               );
             })}
           </ul>
-          <hr/>
+          <hr />
           {!creatingPoll ? (
             <button onClick={() => setCreatingPoll(true)} style={{ background: '#0d6efd', color: '#fff', padding: '8px 12px', border: 'none', borderRadius: '4px', marginTop: '10px', cursor: 'pointer', width: '100%' }}>➕ 새 투표 만들기</button>
           ) : (
             <div style={{ marginTop: '15px' }}>
               <h4>📝 새 투표 만들기</h4>
-              <input type="text" placeholder="투표 제목" value={newPoll.title} onChange={(e) => setNewPoll(p => ({ ...p, title: e.target.value }))} style={{ width: '100%', marginBottom: '10px', padding: '8px', boxSizing: 'border-box' }} />
+              <input type="text" placeholder="투표 제목 (예: 다음 모임 날짜)" value={newPoll.title} onChange={(e) => setNewPoll(p => ({ ...p, title: e.target.value }))} style={{ width: '100%', marginBottom: '10px', padding: '8px', boxSizing: 'border-box' }} aria-label="투표 제목 입력" />
               <p style={{fontSize: '14px', margin: '0 0 5px 0'}}>항목</p>
               {newPoll.options.map((opt, idx) => (
                 <div key={idx} style={{ display: 'flex', gap: '5px', marginBottom: '6px' }}>
                   <input type="text" placeholder={`항목 ${idx + 1}`} value={opt} onChange={(e) => {
                       const updated = [...newPoll.options]; updated[idx] = e.target.value; setNewPoll(p => ({ ...p, options: updated }));
-                    }} style={{ flex: 1, padding: '6px' }} />
-                  {newPoll.options.length > 2 && <button onClick={() => setNewPoll(p => ({ ...p, options: p.options.filter((_, i) => i !== idx) }))}>❌</button>}
+                    }} style={{ flex: 1, padding: '6px' }} aria-label={`투표 항목 ${idx + 1} 입력`} />
+                  {newPoll.options.length > 2 && <button type="button" onClick={() => setNewPoll(p => ({ ...p, options: p.options.filter((_, i) => i !== idx) }))}>❌</button>}
                 </div>
               ))}
-              <button onClick={() => setNewPoll(p => ({ ...p, options: [...p.options, ''] }))}>➕ 항목 추가</button>
+              <button type="button" onClick={() => setNewPoll(p => ({ ...p, options: [...p.options, ''] }))}>➕ 항목 추가</button>
               <button
+                type="button"
                 style={{ marginLeft: '8px' }}
                 onClick={() => {
                   const date = prompt("날짜를 입력하세요 (예: 2025-06-20 또는 2025-06-20 18:00)");
@@ -583,10 +684,10 @@ const ChatRoomPage = ({ userInfo }) => {
               <div><label><input type="checkbox" checked={newPoll.allowMultiple} onChange={(e) => setNewPoll(p => ({ ...p, allowMultiple: e.target.checked }))} /> 중복 투표 허용</label></div>
               <div><label><input type="checkbox" checked={newPoll.isSecret} onChange={(e) => setNewPoll(p => ({ ...p, isSecret: e.target.checked }))} /> 마감 전까지 결과 비공개</label></div>
               <div><label><input type="checkbox" checked={newPoll.isAnonymous} onChange={(e) => setNewPoll(p => ({ ...p, isAnonymous: e.target.checked }))} /> 익명 투표</label></div>
-              <div style={{marginTop: '10px'}}><label>마감일 설정 (선택): <input type="datetime-local" value={newPoll.deadline} onChange={(e) => setNewPoll(p => ({ ...p, deadline: e.target.value }))} /></label></div>
+              <div style={{marginTop: '10px'}}><label>마감일 설정 (선택): <input type="datetime-local" value={newPoll.deadline} onChange={(e) => setNewPoll(p => ({ ...p, deadline: e.target.value }))} aria-label="투표 마감일 선택" /></label></div>
               <div style={{marginTop: '20px', textAlign: 'center'}}>
-                <button onClick={handleCreatePoll} style={{ background: '#198754', color: '#fff', padding: '8px 12px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>📨 투표 등록</button>
-                <button onClick={() => { setCreatingPoll(false); setNewPoll({ title: '', options: ['', ''], deadline: '', allowMultiple: false, isSecret: false, isAnonymous: false }); }} style={{ marginLeft: '8px', background: '#6c757d', color: '#fff', padding: '8px 12px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>취소</button>
+                <button type="button" onClick={handleCreatePoll} style={{ background: '#198754', color: '#fff', padding: '8px 12px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>📨 투표 등록</button>
+                <button type="button" onClick={() => { setCreatingPoll(false); setNewPoll({ title: '', options: ['', ''], deadline: '', allowMultiple: false, isSecret: false, isAnonymous: false }); }} style={{ marginLeft: '8px', background: '#6c757d', color: '#fff', padding: '8px 12px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>취소</button>
               </div>
             </div>
           )}
@@ -598,20 +699,20 @@ const ChatRoomPage = ({ userInfo }) => {
       <Modal isOpen={showInviteModal} onRequestClose={() => closeModal(setShowInviteModal)} style={{ overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 }, content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '420px', padding: '20px', borderRadius: '10px' } }}>
         <h3>➕ 참여자 초대</h3>
         <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', borderBottom: '1px solid #ccc', paddingBottom: '10px' }}>
-          <button onClick={() => setInviteTab('search')} style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '4px', background: inviteTab === 'search' ? '#0d6efd' : '#eee', color: inviteTab === 'search' ? '#fff' : '#000', cursor: 'pointer' }}>🔍 사용자 검색</button>
-          <button onClick={() => setInviteTab('link')} style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '4px', background: inviteTab === 'link' ? '#0d6efd' : '#eee', color: inviteTab === 'link' ? '#fff' : '#000', cursor: 'pointer' }}>🔗 링크 초대</button>
+          <button type="button" onClick={() => setInviteTab('search')} style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '4px', background: inviteTab === 'search' ? '#0d6efd' : '#eee', color: inviteTab === 'search' ? '#fff' : '#000', cursor: 'pointer' }}>🔍 사용자 검색</button>
+          <button type="button" onClick={() => setInviteTab('link')} style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '4px', background: inviteTab === 'link' ? '#0d6efd' : '#eee', color: inviteTab === 'link' ? '#fff' : '#000', cursor: 'pointer' }}>🔗 링크 초대</button>
         </div>
         {inviteTab === 'search' && (
           <div>
             <div style={{ display: 'flex', gap: '5px' }}>
-              <input placeholder="닉네임 검색" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, marginBottom: '10px', padding: '8px' }} />
-              <button onClick={handleSearchUsers} style={{ marginBottom: '10px', padding: '8px', cursor: 'pointer' }}>🔍</button>
+              <input placeholder="닉네임 검색 (예: 홍길동)" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, marginBottom: '10px', padding: '8px' }} aria-label="닉네임 검색" />
+              <button type="button" onClick={handleSearchUsers} style={{ marginBottom: '10px', padding: '8px', cursor: 'pointer' }} aria-label="사용자 검색">🔍</button>
             </div>
             <ul style={{ listStyle: 'none', padding: 0, maxHeight: '150px', overflowY: 'auto' }}>
               {searchResults.map(user => (
                 <li key={user.uid} style={{ marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>{user.name} ({user.nickname})</span>
-                  <button onClick={() => handleInviteUser(user.uid, user.nickname)} style={{ marginLeft: '10px', cursor: 'pointer' }}>초대</button>
+                  <button type="button" onClick={() => handleInviteUser(user.uid, user.nickname)} style={{ marginLeft: '10px', cursor: 'pointer' }}>초대</button>
                 </li>
               ))}
             </ul>
@@ -620,11 +721,11 @@ const ChatRoomPage = ({ userInfo }) => {
         {inviteTab === 'link' && (
           <div>
             <p>아래 링크를 복사하거나 공유하세요:</p>
-            <input type="text" value={`${window.location.origin}/chat/invite/${roomId}`} readOnly style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }} />
-            <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/chat/invite/${roomId}`); alert('링크가 복사되었습니다!'); }} style={{ marginTop: '8px', cursor: 'pointer' }}>📋 복사</button>
+            <input type="text" value={`${window.location.origin}/chat/invite/${roomId}`} readOnly style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }} aria-label="초대 링크" />
+            <button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/chat/invite/${roomId}`); alert('링크가 복사되었습니다!'); }} style={{ marginTop: '8px', cursor: 'pointer' }}>📋 복사</button>
           </div>
         )}
-        <button onClick={() => closeModal(setShowInviteModal)} style={{ marginTop: '20px', padding: '8px 12px', background: '#6c757d', color: '#fff', cursor: 'pointer', border: 'none', borderRadius: '4px' }}>닫기</button>
+        <button type="button" onClick={() => closeModal(setShowInviteModal)} style={{ marginTop: '20px', padding: '8px 12px', background: '#6c757d', color: '#fff', cursor: 'pointer', border: 'none', borderRadius: '4px' }}>닫기</button>
       </Modal>
     </div>
   );
