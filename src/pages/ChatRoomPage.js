@@ -10,7 +10,7 @@ import {
 import { Picker } from 'emoji-mart';
 import Modal from 'react-modal';
 
-Modal.setAppElement('#root'); //
+Modal.setAppElement('#root');
 
 const ChatRoomPage = ({ userInfo }) => {
   const { roomId } = useParams();
@@ -55,7 +55,7 @@ const ChatRoomPage = ({ userInfo }) => {
     fontSize: '14px'
   };
 
-  // --- 실시간 데이터 구독 및 상태 관리 ---
+  // 실시간 데이터 구독 및 상태 관리
   useEffect(() => {
     if (!roomId) return;
     const roomDocRef = doc(db, "chatRooms", roomId);
@@ -66,49 +66,54 @@ const ChatRoomPage = ({ userInfo }) => {
         setRoomInfo(null);
       }
       setLoading(false);
+    }, (error) => {
+      console.error("채팅방 정보 구독 오류:", error);
+      setLoading(false);
     });
     return () => unsubscribe();
   }, [roomId]);
 
   useEffect(() => {
-    if (!roomId || !currentUser?.uid || !roomInfo) return;
-    if (roomInfo.participants?.includes(currentUser.uid)) {
+    const handleFocus = () => {
+      if (!roomId || !currentUser?.uid || !roomInfo?.participants?.includes(currentUser.uid)) return;
       updateDoc(doc(db, "chatRooms", roomId), {
         [`lastRead.${currentUser.uid}`]: new Date()
-      }).catch(() => {});
-    }
-  }, [roomId, currentUser, roomInfo?.participants, messages]);
+      }).catch((error) => console.error("lastRead 업데이트 오류:", error));
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [roomId, currentUser, roomInfo]);
 
   useEffect(() => {
-  if (!roomId) return;
-  const q = query(collection(db, "chatRooms", roomId, "messages"), orderBy("createdAt"));
-  const unsubscribe = onSnapshot(q, (snapshot) => {
-    const newMessages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-    if (document.hidden && newMessages.length > messages.length) {
-      const lastMessage = newMessages[newMessages.length - 1];
-      if (lastMessage.uid !== currentUser?.uid && notificationPermission === 'granted') {
-        new Notification(roomInfo?.roomName || '새 메시지', {
-          body: `${lastMessage.userName}: ${lastMessage.text}`,
-          tag: roomId,
-        });
+    if (!roomId) return;
+    const q = query(collection(db, "chatRooms", roomId, "messages"), orderBy("createdAt"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newMessages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      if (document.hidden && newMessages.length > messages.length) {
+        const lastMessage = newMessages[newMessages.length - 1];
+        if (lastMessage.uid !== currentUser?.uid && notificationPermission === 'granted') {
+          new Notification(roomInfo?.roomName || '새 메시지', {
+            body: `${lastMessage.userName}: ${lastMessage.text}`,
+            tag: roomId,
+          });
+        }
       }
-    }
-    setMessages(newMessages);
-  }, (err) => console.error(err));
-  return () => unsubscribe();
-}, [roomId, notificationPermission, roomInfo, currentUser]);
+      setMessages(newMessages);
+    }, (error) => console.error("메시지 구독 오류:", error));
+    return () => unsubscribe();
+  }, [roomId, notificationPermission, roomInfo, currentUser, messages.length]);
 
   useEffect(() => {
     if (!roomId) return;
     const q = query(collection(db, "chatRooms", roomId, "announcements"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => setNoticeList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))), (err) => console.error(err));
+    const unsubscribe = onSnapshot(q, (snapshot) => setNoticeList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))), (error) => console.error("공지 구독 오류:", error));
     return () => unsubscribe();
   }, [roomId]);
 
   useEffect(() => {
     if (!roomId) return;
     const q = query(collection(db, "chatRooms", roomId, "polls"), orderBy("createdAt", "desc"));
-    const unsubscribe = onSnapshot(q, (snapshot) => setPollList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))), (err) => console.error(err));
+    const unsubscribe = onSnapshot(q, (snapshot) => setPollList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))), (error) => console.error("투표 구독 오류:", error));
     return () => unsubscribe();
   }, [roomId]);
 
@@ -117,85 +122,82 @@ const ChatRoomPage = ({ userInfo }) => {
   }, [messages]);
 
   useEffect(() => {
-  if (!roomId || !currentUser || !db) return; // 초기화 확인
-
-  const fetchRoomInfo = async () => {
-    try {
-      const roomRef = doc(db, 'chatRooms', roomId);
-      const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) {
-        alert('채팅방이 존재하지 않습니다.');
-        navigate('/chat');
-        return;
-      }
-      const data = roomSnap.data();
-      const isParticipant = data.participants?.includes(currentUser.uid);
-      const isCreator = data.createdBy === currentUser.uid;
-
-      if (!isParticipant && !isCreator) {
-        if (data.isPrivate) {
-          const inputPassword = prompt("이 채팅방은 비공개입니다. 비밀번호를 입력하세요:");
-          if (inputPassword === null) {
-            alert("입장이 취소되었습니다.");
-            navigate('/chat');
-            return;
-          }
-          if (inputPassword !== data.password) {
-            alert("비밀번호가 일치하지 않습니다.");
-            navigate('/chat');
-            return;
-          }
-        } else {
-          alert("초대 수락 후 입장할 수 있습니다.");
+    if (!roomId || !currentUser || !db) return;
+    const fetchRoomInfo = async () => {
+      try {
+        const roomRef = doc(db, 'chatRooms', roomId);
+        const roomSnap = await getDoc(roomRef);
+        if (!roomSnap.exists()) {
+          alert('채팅방이 존재하지 않습니다.');
           navigate('/chat');
           return;
         }
+        const data = roomSnap.data();
+        const isParticipant = data.participants?.includes(currentUser.uid);
+        const isCreator = data.createdBy === currentUser.uid;
+        if (!isParticipant && !isCreator) {
+          if (data.isPrivate) {
+            const inputPassword = prompt("이 채팅방은 비공개입니다. 비밀번호를 입력하세요:");
+            if (inputPassword === null) {
+              alert("입장이 취소되었습니다.");
+              navigate('/chat');
+              return;
+            }
+            if (inputPassword !== data.password) {
+              alert("비밀번호가 일치하지 않습니다.");
+              navigate('/chat');
+              return;
+            }
+          } else {
+            alert("초대 수락 후 입장할 수 있습니다.");
+            navigate('/chat');
+            return;
+          }
+        }
+        setRoomInfo(data);
+        await updateDoc(roomRef, {
+          [`lastRead.${currentUser.uid}`]: new Date()
+        });
+      } catch (error) {
+        console.error("채팅방 정보 불러오기 실패:", error);
+        alert("채팅방 입장 중 오류가 발생했습니다.");
+        navigate('/chat');
       }
-      setRoomInfo(data);
-      await updateDoc(roomRef, {
-        [`lastRead.${currentUser.uid}`]: new Date()
-      });
-    } catch (err) {
-      console.error("채팅방 정보 불러오기 실패:", err);
-      alert("채팅방 입장 중 오류가 발생했습니다.");
-      navigate('/chat');
-    }
-  };
-
-  fetchRoomInfo();
-}, [roomId, currentUser, navigate, db, setRoomInfo]); // 의존성 추가
+    };
+    fetchRoomInfo();
+  }, [roomId, currentUser, navigate, db, setRoomInfo]);
 
   useEffect(() => {
-  if (!('Notification' in window)) { // 알림 지원 확인 추가
-    console.warn('이 브라우저는 알림을 지원하지 않습니다.');
-    return;
-  }
-  if (Notification.permission !== 'granted') {
-    Notification.requestPermission().then(permission => {
-      setNotificationPermission(permission);
-    });
-  }
-  const handlePopState = () => {
-    if (window.history.state?.modal !== 'open') { // 팝업이 열려 있지 않으면 모두 닫기
-      setShowMenu(false);
-      setShowNoticeModal(false);
-      setShowPollModal(false);
-      setShowInviteModal(false);
-      setSelectedUser(null);
-      setShowParticipants(false);
+    if (!('Notification' in window)) {
+      console.warn('이 브라우저는 알림을 지원하지 않습니다.');
+      return;
+    }
+    if (Notification.permission !== 'granted') {
+      Notification.requestPermission().then(permission => {
+        setNotificationPermission(permission);
+      });
+    }
+    const handlePopState = () => {
+      if (window.history.state?.modal !== 'open') {
+        setShowMenu(false);
+        setShowNoticeModal(false);
+        setShowPollModal(false);
+        setShowInviteModal(false);
+        setSelectedUser(null);
+        setShowParticipants(false);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Helper Functions
+  const closeModal = (setFunction) => {
+    setFunction(false);
+    if (window.history.state?.modal === 'open') {
+      window.history.back();
     }
   };
-  window.addEventListener('popstate', handlePopState);
-  return () => window.removeEventListener('popstate', handlePopState);
-}, []);
-
-  // --- Helper Functions ---
-  const closeModal = (setFunction) => {
-  setFunction(false);
-  if (window.history.state?.modal === 'open') { // 상태가 'open'인지 확인
-    window.history.back();
-  }
-};
   const openModalWithHistory = (setFunction) => {
     window.history.pushState({ modal: 'open' }, '', window.location.href);
     setFunction(true);
@@ -205,17 +207,37 @@ const ChatRoomPage = ({ userInfo }) => {
     setNewMessage(prev => prev + emoji.native);
   };
 
-  // --- Event Handlers ---
+  // 메시지 전송 (400 오류 방지: 필수값 체크)
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !currentUser || !roomId || !userInfo?.nickname) return;
+    if (!newMessage.trim() || !currentUser || !roomId || !userInfo?.nickname) {
+      alert("메시지 내용과 사용자 정보가 필요합니다.");
+      return;
+    }
     try {
-      await addDoc(collection(db, "chatRooms", roomId, "messages"), { text: newMessage, createdAt: serverTimestamp(), uid: currentUser.uid, userName: userInfo.nickname });
-      await updateDoc(doc(db, "chatRooms", roomId), { lastMessage: newMessage, updatedAt: serverTimestamp(), [`lastRead.${currentUser.uid}`]: new Date() });
+      console.log("전송 데이터 확인:", { text: newMessage, uid: currentUser.uid, userName: userInfo.nickname, roomId });
+      await addDoc(collection(db, "chatRooms", roomId, "messages"), {
+        text: newMessage,
+        createdAt: serverTimestamp(),
+        uid: currentUser.uid,
+        userName: userInfo.nickname
+      });
+      await updateDoc(doc(db, "chatRooms", roomId), {
+        lastMessage: newMessage,
+        updatedAt: serverTimestamp(),
+        [`lastRead.${currentUser.uid}`]: new Date()
+      });
       setNewMessage('');
-      // 피드백 메시지: 메시지 전송 성공
-      // alert("메시지가 전송되었습니다!");
-    } catch (err) { console.error("메시지 전송 오류:", err); alert("메시지 전송 중 오류가 발생했습니다."); }
+    } catch (error) {
+      console.error("메시지 전송 오류:", error);
+      if (error.code === 'permission-denied') {
+        alert("Firestore 권한이 부족합니다. 규칙을 확인하세요.");
+      } else if (error.code === 'resource-exhausted') {
+        alert("요청이 제한되었습니다. 잠시 후 다시 시도하세요.");
+      } else {
+        alert("메시지 전송 중 오류가 발생했습니다.");
+      }
+    }
   };
 
   const handleUserClick = async (uid) => {
@@ -224,35 +246,35 @@ const ChatRoomPage = ({ userInfo }) => {
       if (docSnap.exists()) {
         openModalWithHistory(() => setSelectedUser(docSnap.data()));
       }
-    } catch (err) { console.error("사용자 정보 오류:", err); }
+    } catch (error) { console.error("사용자 정보 오류:", error); }
   };
 
   // ✅ 강퇴 기능: 방장/운영자만 사용 가능
   const handleBanUser = async (banUid, banName) => {
-  if (roomInfo.createdBy !== currentUser.uid) { // 방장인지 확인
-    alert("강퇴 권한이 없습니다. 방장만 강퇴할 수 있습니다.");
-    return;
-  }
-  if (!window.confirm(`${banName}님을 강퇴하시겠습니까?`)) return;
-  const roomRef = doc(db, "chatRooms", roomId);
-  try {
-    const index = roomInfo.participants.indexOf(banUid);
-    if (index === -1) {
-      alert("사용자를 찾을 수 없습니다.");
+    if (roomInfo.createdBy !== currentUser.uid) {
+      alert("강퇴 권한이 없습니다. 방장만 강퇴할 수 있습니다.");
       return;
     }
-    await updateDoc(roomRef, {
-      [`bannedUsers.${banUid}`]: { bannedAt: serverTimestamp(), bannedBy: currentUser.uid },
-      participants: roomInfo.participants.filter(uid => uid !== banUid),
-      participantNames: roomInfo.participantNames.filter((_, i) => i !== index),
-      participantNicknames: roomInfo.participantNicknames.filter((_, i) => i !== index),
-    });
-    alert(`${banName}님을 강퇴했습니다.`);
-  } catch (err) {
-    console.error("강퇴 오류:", err);
-    alert("강퇴 중 오류가 발생했습니다.");
-  }
-};
+    if (!window.confirm(`${banName}님을 강퇴하시겠습니까?`)) return;
+    const roomRef = doc(db, "chatRooms", roomId);
+    try {
+      const index = roomInfo.participants.indexOf(banUid);
+      if (index === -1) {
+        alert("사용자를 찾을 수 없습니다.");
+        return;
+      }
+      await updateDoc(roomRef, {
+        [`bannedUsers.${banUid}`]: { bannedAt: serverTimestamp(), bannedBy: currentUser.uid },
+        participants: roomInfo.participants.filter(uid => uid !== banUid),
+        participantNames: roomInfo.participantNames.filter((_, i) => i !== index),
+        participantNicknames: roomInfo.participantNicknames.filter((_, i) => i !== index),
+      });
+      alert(`${banName}님을 강퇴했습니다.`);
+    } catch (error) {
+      console.error("강퇴 오류:", error);
+      alert("강퇴 중 오류가 발생했습니다.");
+    }
+  };
 
   // ✅ 강퇴된 유저는 즉시 퇴장
   useEffect(() => {
@@ -277,7 +299,7 @@ const ChatRoomPage = ({ userInfo }) => {
       });
       alert("채팅방에서 나갔습니다.");
       navigate("/chat");
-    } catch (err) { console.error("채팅방 나가기 오류:", err); alert("채팅방 나가기 중 오류가 발생했습니다."); }
+    } catch (error) { console.error("채팅방 나가기 오류:", error); alert("채팅방 나가기 중 오류가 발생했습니다."); }
   };
 
   const handleAddNotice = async () => {
@@ -286,7 +308,7 @@ const ChatRoomPage = ({ userInfo }) => {
       await addDoc(collection(db, "chatRooms", roomId, "announcements"), { ...newNotice, createdAt: serverTimestamp(), createdBy: currentUser.uid, createdByName: userInfo.nickname });
       setNewNotice({ title: '', content: '' });
       alert("공지 등록이 완료되었습니다.");
-    } catch (err) { console.error("공지 등록 오류:", err); alert("공지 등록 중 오류가 발생했습니다."); }
+    } catch (error) { console.error("공지 등록 오류:", error); alert("공지 등록 중 오류가 발생했습니다."); }
   };
 
   const handleSearchUsers = async () => {
@@ -302,7 +324,7 @@ const ChatRoomPage = ({ userInfo }) => {
     try {
       await setDoc(invitationRef, { uid, nickname, invitedBy: currentUser.uid, invitedByName: userInfo.nickname, createdAt: serverTimestamp() });
       alert(`${nickname}님에게 초대장을 보냈습니다.`);
-    } catch (err) { console.error("초대 오류:", err); alert("초대 중 오류가 발생했습니다."); }
+    } catch (error) { console.error("초대 오류:", error); alert("초대 중 오류가 발생했습니다."); }
   };
 
   const handleCreatePoll = async () => {
@@ -317,7 +339,7 @@ const ChatRoomPage = ({ userInfo }) => {
       setNewPoll({ title: '', options: ['', ''], deadline: '', allowMultiple: false, isSecret: false, isAnonymous: false });
       setCreatingPoll(false);
       alert("투표가 등록되었습니다!");
-    } catch (err) { console.error("투표 생성 오류:", err); alert("투표 등록 중 오류가 발생했습니다."); }
+    } catch (error) { console.error("투표 생성 오류:", error); alert("투표 등록 중 오류가 발생했습니다."); }
   };
 
   const handleVote = async (poll, option) => {
@@ -329,7 +351,7 @@ const ChatRoomPage = ({ userInfo }) => {
     } else {
       newVotes = myVotes.includes(option) ? [] : [option];
     }
-    await updateDoc(pollRef, { [`votes.${currentUser.uid}`]: newVotes }).catch(err => { console.error("투표하기 오류: ", err); alert("투표 중 오류가 발생했습니다."); });
+    await updateDoc(pollRef, { [`votes.${currentUser.uid}`]: newVotes }).catch(error => { console.error("투표하기 오류: ", error); alert("투표 중 오류가 발생했습니다."); });
     alert("투표가 반영되었습니다.");
   };
 
@@ -372,60 +394,57 @@ const ChatRoomPage = ({ userInfo }) => {
 
   // 참여자가 아닌 경우, 입장 조건 확인 로직
   if (!roomInfo || !roomInfo.participants?.includes(currentUser.uid)) {
-    // 상태 변수 추가 (src/pages/ChatRoomPage.js, 약 50줄, 다른 상태들 아래)
-
-// handleEntryCheck 함수 수정 (src/pages/ChatRoomPage.js, 약 350줄)
-const handleEntryCheck = () => {
-  if (!roomInfo) return <BlockedScreen message="존재하지 않는 채팅방입니다." />;
-  if (roomInfo.maxParticipants && roomInfo.participants.length >= roomInfo.maxParticipants) {
-    return <BlockedScreen message="채팅방 정원이 가득 찼습니다." />;
-  }
-  if (roomInfo.isPrivate && !roomInfo.participants?.includes(currentUser.uid)) {
-    return (
-      <Modal
-        isOpen={true}
-        onRequestClose={() => navigate('/chat')}
-        style={{
-          overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 },
-          content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '300px', padding: '20px', borderRadius: '10px' }
-        }}
-      >
-        <h3>비공개 채팅방</h3>
-        <p>비밀번호를 입력하세요:</p>
-        <input
-          type="password"
-          value={passwordInput}
-          onChange={(e) => setPasswordInput(e.target.value)}
-          style={{ width: '100%', padding: '8px', marginBottom: '10px' }}
-          aria-label="비밀번호 입력"
-        />
-        <button
-          onClick={async () => {
-            if (passwordInput === roomInfo.password) {
-              await handleJoinRoom();
-              setShowPasswordModal(false);
-            } else {
-              alert("비밀번호가 일치하지 않습니다.");
-            }
-          }}
-          style={{ padding: '8px 12px', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-        >
-          확인
-        </button>
-        <button
-          onClick={() => navigate('/chat')}
-          style={{ marginLeft: '10px', padding: '8px 12px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-        >
-          취소
-        </button>
-      </Modal>
-    );
-  }
-  if (!roomInfo.isPrivate && !roomInfo.participants.includes(currentUser.uid)) {
-    return <BlockedScreen message="초대 후 입장할 수 있는 채팅방입니다." />;
-  }
-  return <BlockedScreen message="아직 이 채팅방에 참여하지 않았습니다." />;
-};
+    const handleEntryCheck = () => {
+      if (!roomInfo) return <BlockedScreen message="존재하지 않는 채팅방입니다." />;
+      if (roomInfo.maxParticipants && roomInfo.participants.length >= roomInfo.maxParticipants) {
+        return <BlockedScreen message="채팅방 정원이 가득 찼습니다." />;
+      }
+      if (roomInfo.isPrivate && !roomInfo.participants?.includes(currentUser.uid)) {
+        return (
+          <Modal
+            isOpen={true}
+            onRequestClose={() => navigate('/chat')}
+            style={{
+              overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 },
+              content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '300px', padding: '20px', borderRadius: '10px' }
+            }}
+          >
+            <h3>비공개 채팅방</h3>
+            <p>비밀번호를 입력하세요:</p>
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              style={{ width: '100%', padding: '8px', marginBottom: '10px' }}
+              aria-label="비밀번호 입력"
+            />
+            <button
+              onClick={async () => {
+                if (passwordInput === roomInfo.password) {
+                  await handleJoinRoom();
+                  setShowPasswordModal(false);
+                } else {
+                  alert("비밀번호가 일치하지 않습니다.");
+                }
+              }}
+              style={{ padding: '8px 12px', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            >
+              확인
+            </button>
+            <button
+              onClick={() => navigate('/chat')}
+              style={{ marginLeft: '10px', padding: '8px 12px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            >
+              취소
+            </button>
+          </Modal>
+        );
+      }
+      if (!roomInfo.isPrivate && !roomInfo.participants.includes(currentUser.uid)) {
+        return <BlockedScreen message="초대 후 입장할 수 있는 채팅방입니다." />;
+      }
+      return <BlockedScreen message="아직 이 채팅방에 참여하지 않았습니다." />;
+    };
     return handleEntryCheck();
   }
 
@@ -486,11 +505,18 @@ const handleEntryCheck = () => {
       <Modal
   isOpen={showParticipants}
   onRequestClose={() => setShowParticipants(false)}
+  shouldCloseOnOverlayClick={true}
+  shouldCloseOnEsc={true}
+  aria={{ labelledby: "participantsTitle" }}
+  contentLabel="참여자 목록"
   style={{
-    overlay: { backgroundColor: 'rgba(0,0,0,0.15)', zIndex: 1100 },
+    overlay: {
+      backgroundColor: 'rgba(0,0,0,0.15)',
+      zIndex: 1100
+    },
     content: {
-      top: '70px', // 헤더 높이만큼 아래
-      right: '0',
+      top: '70px',
+      right: '0px',
       left: 'auto',
       bottom: 'auto',
       width: '320px',
@@ -501,36 +527,71 @@ const handleEntryCheck = () => {
       overflow: 'auto',
       margin: 0,
       position: 'fixed',
-      background: '#fff'
+      background: '#fff',
+      zIndex: 1200
     }
   }}
-  contentLabel="참여자 목록"
 >
-  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-    <strong style={{fontSize:'16px'}}>참여자 목록</strong>
-    <button onClick={() => setShowParticipants(false)} style={{fontSize:'20px', background:'none', border:'none', cursor:'pointer'}}>×</button>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+    <strong id="participantsTitle" style={{ fontSize: '16px' }}>참여자 목록</strong>
+    <button
+      onClick={() => setShowParticipants(false)}
+      style={{
+        fontSize: '20px',
+        background: 'none',
+        border: 'none',
+        color: '#000',
+        cursor: 'pointer',
+        zIndex: 1300
+      }}
+      aria-label="참여자 목록 닫기"
+      title="참여자 목록 닫기"
+      tabIndex={0}
+    >
+      ×
+    </button>
   </div>
-  <div style={{fontSize:'13px', color:'#888', marginBottom:'12px'}}>
+  <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>
     채팅방에 함께 참여 중인 사람들입니다.
   </div>
-  <div style={{maxHeight:'70vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:'8px'}}>
+  <div style={{ maxHeight: '70vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
     {roomInfo?.participantNames?.map((name, idx) => (
       <span key={idx} style={{
-        display: 'flex', alignItems: 'center', gap: '6px',
-        background: '#fffbe6', borderRadius: '20px', padding: '6px 12px',
-        fontSize: '15px', fontWeight: 500, marginBottom: '8px'
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        background: '#fffbe6',
+        borderRadius: '20px',
+        padding: '6px 12px',
+        fontSize: '15px',
+        fontWeight: 500
       }}>
         <span style={{
-          background: '#ffeb3b', borderRadius: '50%', width: '26px', height: '26px',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 'bold', fontSize: '14px'
+          background: '#ffeb3b',
+          borderRadius: '50%',
+          width: '26px',
+          height: '26px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontWeight: 'bold',
+          fontSize: '14px'
         }}>
-          {name.slice(0,2)}
+          {name.slice(0, 2)}
         </span>
-        <span style={{wordBreak:'break-all'}}>{name} ({roomInfo.participantNicknames?.[idx] || '닉네임 없음'})</span>
+        <span style={{ wordBreak: 'break-all' }}>{name} ({roomInfo.participantNicknames?.[idx] || '닉네임 없음'})</span>
         {roomInfo.createdBy === currentUser.uid && roomInfo.participants[idx] !== currentUser.uid && (
           <button
-            style={{marginLeft:'6px', color:'#fff', background:'#dc3545', border:'none', borderRadius:'12px', padding:'2px 10px', fontSize:'13px', cursor:'pointer'}}
+            style={{
+              marginLeft: '6px',
+              color: '#fff',
+              background: '#dc3545',
+              border: 'none',
+              borderRadius: '12px',
+              padding: '2px 10px',
+              fontSize: '13px',
+              cursor: 'pointer'
+            }}
             onClick={() => handleBanUser(roomInfo.participants[idx], name)}
             aria-label={`${name} 강퇴`}
             type="button"

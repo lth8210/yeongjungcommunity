@@ -186,6 +186,8 @@ const HomePage = ({ userInfo }) => {
         </div>
       </div>
 
+      <a href="#main-content" className="skip-link" tabIndex={0}>본문 바로가기</a>
+
       <input
         className="main-search"
         type="text"

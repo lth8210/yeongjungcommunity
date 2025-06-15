@@ -882,3 +882,121 @@ button:disabled {
   max-width: 95vw;
   box-shadow: 0 2px 16px rgba(0,0,0,0.18);
 }
+
+:root {
+  --primary-color: #0d6efd;
+  --success-color: #198754;
+  --danger-color: #dc3545;
+  --warning-color: #ffc107;
+  --light-gray: #f8f9fa;
+  --medium-gray: #dee2e6;
+  --dark-gray: #6c757d;
+  --text-color: #212529;
+  --white-color: #fff;
+  --body-bg: #f0f2f5;
+  --card-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  --card-border-radius: 8px;
+}
+body {
+  font-size: 1rem; /* rem 단위 */
+  background-color: var(--body-bg);
+  color: var(--text-color);
+  font-family: 'Noto Sans KR', sans-serif;
+  line-height: 1.7;
+}
+button, .tab, .quick-card, .main-search {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 1rem;
+  border-radius: 8px;
+}
+button:focus, a:focus, [tabindex]:focus, .tab:focus, .quick-card:focus {
+  outline: 2px solid var(--primary-color);
+  box-shadow: 0 0 0 2px #b3d4fc;
+}
+.button-primary, .save-button, .apply-button, .approve-button {
+  background: var(--primary-color);
+  color: #fff;
+}
+.button-primary:focus, .save-button:focus, .apply-button:focus {
+  outline: 2px solid var(--primary-color);
+}
+input, textarea {
+  font-size: 1rem;
+  border-radius: 6px;
+}
+@media (max-width: 600px) {
+  .main-search, .tab, .quick-card {
+    font-size: 1.1rem;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 10px 8px;
+  }
+  .app-header, .header-content, main {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}
+.tab.active, .tab[aria-selected="true"] {
+  font-weight: bold;
+  border-bottom: 3px solid var(--primary-color);
+  background: #e3f0ff;
+  color: var(--primary-color);
+}
+.tab {
+  background: #f8f9fa;
+  color: #888;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-right: 2px;
+}
+.tab:focus {
+  outline: 2px solid var(--primary-color);
+}
+.quick-card {
+  background: #fff;
+  color: #212529;
+  box-shadow: var(--card-shadow);
+  border: 1px solid var(--medium-gray);
+  border-radius: var(--card-border-radius);
+  padding: 18px 22px;
+  margin: 0 8px;
+  transition: box-shadow 0.2s;
+}
+.quick-card:focus, .quick-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.carousel .slide {
+  background: none;
+}
+.carousel .control-arrow, .carousel.carousel-slider .control-arrow {
+  background: rgba(0,0,0,0.1);
+  color: var(--primary-color);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+}
+.carousel .control-arrow:focus {
+  outline: 2px solid var(--primary-color);
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: 10000;
+}
+.skip-link:focus {
+  left: 0;
+  top: 0;
+  width: auto;
+  height: auto;
+  background: #0d6efd;
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 0 0 8px 0;
+  outline: 2px solid #fff;
+}
