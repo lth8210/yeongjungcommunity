@@ -80,13 +80,24 @@ const HomePage = ({ userInfo }) => {
   const unreadCount = myChats.reduce((acc, room) => acc + (room.unreadCount || 0), 0);
 
   const handleMessageClick = (user) => {
-    setTargetUser(user);
-    setShowMessageModal(true);
-  };
-  const handleChatClick = (user) => {
-    setTargetUser(user);
-    setShowChatModal(true);
-  };
+  const fixedUser = { ...user, uid: user.uid || user.id };
+  if (!userInfo?.uid || !fixedUser?.uid) {
+    alert("본인 또는 상대방 정보가 올바르지 않습니다.");
+    return;
+  }
+  setTargetUser(fixedUser);
+  setShowMessageModal(true);
+};
+
+const handleChatClick = (user) => {
+  const fixedUser = { ...user, uid: user.uid || user.id };
+  if (!userInfo?.uid || !fixedUser?.uid) {
+    alert("본인 또는 상대방 정보가 올바르지 않습니다.");
+    return;
+  }
+  setTargetUser(fixedUser);
+  setShowChatModal(true);
+};
 
   const quickCards = [
     {
@@ -455,22 +466,24 @@ const HomePage = ({ userInfo }) => {
         </div>
       </div>
 
-      {showMessageModal && targetUser && (
-        <MessageModal
-          open={showMessageModal}
-          onClose={() => setShowMessageModal(false)}
-          fromUser={userInfo}
-          toUser={targetUser}
-        />
-      )}
-      {showChatModal && targetUser && (
-        <ChatModal
-          open={showChatModal}
-          onClose={() => setShowChatModal(false)}
-          fromUser={userInfo}
-          toUser={targetUser}
-        />
-      )}
+      {showMessageModal && targetUser && userInfo && (
+  <MessageModal
+    open={showMessageModal}
+    onClose={() => setShowMessageModal(false)}
+    fromUser={userInfo}
+    toUser={targetUser}
+  />
+)}
+
+{showChatModal && targetUser && userInfo && (
+  <ChatModal
+    open={showChatModal}
+    onClose={() => setShowChatModal(false)}
+    fromUser={userInfo}
+    toUser={targetUser}
+  />
+)}
+   
     </div>
   );
 };

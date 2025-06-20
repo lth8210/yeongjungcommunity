@@ -1,3 +1,4 @@
+// InquiryForm.js
 import React, { useState } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -19,7 +20,7 @@ const InquiryForm = ({ onInquiryAdded, userInfo }) => {
         createdAt: serverTimestamp(),
       });
       setContent('');
-      onInquiryAdded(); // refresh list
+      onInquiryAdded();
     } catch (error) {
       console.error('문의 제출 실패:', error);
       alert('문의 제출 중 오류가 발생했습니다.');

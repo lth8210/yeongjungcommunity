@@ -11,28 +11,36 @@ const MessageModal = ({ open, onClose, fromUser, toUser }) => {
   if (!open) return null;
 
   const handleSend = async () => {
-    if (!message.trim()) return;
-    setSending(true);
-    try {
-      await addDoc(collection(db, "messages"), {
-        from: fromUser.uid,
-        to: toUser.uid,
-        content: message,
-        createdAt: serverTimestamp(),
-        read: false,
-      });
-      setSending(false);
-      setSent(true);
-      setTimeout(() => {
-        setSent(false);
-        setMessage('');
-        onClose();
-      }, 1200);
-    } catch (err) {
-      setSending(false);
-      alert("쪽지 전송 중 오류가 발생했습니다.");
-    }
-  };
+  console.log('handleSend 호출:', { fromUser, toUser, message });
+  if (!message.trim()) return;
+  if (!fromUser?.uid || !toUser?.uid) {
+    alert("보내는 사람 또는 받는 사람 정보가 올바르지 않습니다.");
+    setSending(false);
+    return;
+  }
+  setSending(true);
+  try {
+  await addDoc(collection(db, "messages"), {
+  text: message,
+  createdAt: serverTimestamp(),
+  uid: fromUser.uid,
+  userName: fromUser.nickname || fromUser.email || fromUser.name || "",
+  to: toUser.uid || toUser.id
+});
+
+    setSending(false);
+    setSent(true);
+    setTimeout(() => {
+      setSent(false);
+      setMessage('');
+      onClose();
+    }, 1200);
+  } catch (err) {
+    setSending(false);
+    alert("쪽지 전송 중 오류가 발생했습니다.");
+    console.error("쪽지 오류:", err);
+  }
+};
 
   return (
     <div className="modal-backdrop" tabIndex={0} role="dialog" aria-modal="true" aria-label="쪽지 보내기">

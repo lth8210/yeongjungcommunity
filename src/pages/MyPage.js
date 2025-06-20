@@ -150,6 +150,14 @@ const MyPage = ({ userInfo }) => {
       </div>
 
       <div className="card">
+  <h3>받은 쪽지함</h3>
+  <p>다른 회원에게 받은 쪽지를 확인해보세요.</p>
+  <Link to="/my-messages">
+    <button className="view-messages-button">📨 받은 쪽지 보기</button>
+  </Link>
+</div>
+
+      <div className="card">
         <h3>내가 주최한 모임</h3>
         {myOwnedMeetings.length > 0 ? (
           myOwnedMeetings.map(meeting => (
@@ -217,22 +225,31 @@ const MyPage = ({ userInfo }) => {
         <h3>회원 탈퇴</h3>
         <p>회원 탈퇴 시 계정 정보가 영구적으로 삭제되며 복구할 수 없습니다.</p>
         <button className="withdrawal-button" onClick={async () => {
-          const confirmed = window.confirm("정말로 회원 탈퇴를 진행하시겠습니까? 모든 정보는 삭제되며 복구할 수 없습니다.");
-          if (!confirmed) return;
+  const confirmed = window.confirm("정말로 회원 탈퇴를 진행하시겠습니까? 탈퇴 후에는 복구가 어렵습니다.");
+  if (!confirmed) return;
 
-          try {
-            const userRef = doc(db, "users", userInfo.uid);
-            await deleteDoc(userRef);
-            const userAuth = auth.currentUser;
-            if (userAuth) await deleteUser(userAuth);
-            alert("탈퇴가 완료되었습니다.");
-          } catch (err) {
-            console.error("탈퇴 오류:", err);
-            alert("회원 탈퇴 중 오류가 발생했습니다.");
-          }
-        }}>
-          회원 탈퇴하기
-        </button>
+  try {
+    const userRef = doc(db, "users", userInfo.uid);
+    // ✅ 실제 삭제 대신 소프트 삭제 플래그와 익명화 처리
+    await updateDoc(userRef, {
+      isDisabled: true,
+      deletedAt: new Date(),
+      nickname: "탈퇴회원",
+      name: "",
+      email: `deleted_${userInfo.uid}@example.com`
+    });
+    alert("회원 탈퇴 처리가 완료되었습니다.");
+    // 로그아웃
+    const userAuth = auth.currentUser;
+    if (userAuth) await deleteUser(userAuth);
+    window.location.href = "/";
+  } catch (err) {
+    console.error("탈퇴 오류:", err);
+    alert("회원 탈퇴 중 오류가 발생했습니다.");
+  }
+}}>
+  회원 탈퇴하기
+</button>
       </div>
     </div>
   );

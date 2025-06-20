@@ -17,6 +17,8 @@ import ChatListPage from './pages/ChatListPage';
 import ChatRoomPage from './pages/ChatRoomPage';
 import AdminPage from './pages/AdminPage';
 import InquiriesPage from './pages/InquiriesPage';
+import MyMessagesPage from './pages/MyMessagesPage'; // 추가
+import MessagesPage from './pages/MessagesPage';  // 경로는 실제 위치에 맞게 수정
 
 function App() {
   const [user, setUser] = useState(null);
@@ -101,6 +103,7 @@ function App() {
                   <Link to="/chat" tabIndex={0} aria-label="채팅" title="채팅">채팅</Link>
                   <Link to="/mypage" tabIndex={0} aria-label="마이페이지" title="마이페이지">마이페이지</Link>
                   <Link to="/inquiries" tabIndex={0} aria-label="문의사항" title="문의사항">문의사항</Link>
+                  <Link to="/messages" tabIndex={0} aria-label="쪽지함" title="쪽지함">쪽지함</Link>
                   {isAdmin && (
                     <Link to="/admin" className="admin-link" tabIndex={0} aria-label="관리자" title="관리자">관리자</Link>
                   )}
@@ -147,6 +150,7 @@ function App() {
                 <Link to="/chat" onClick={() => setIsNavOpen(false)} tabIndex={0} aria-label="채팅" title="채팅">채팅</Link>
                 <Link to="/mypage" onClick={() => setIsNavOpen(false)} tabIndex={0} aria-label="마이페이지" title="마이페이지">마이페이지</Link>
                 <Link to="/inquiries" onClick={() => setIsNavOpen(false)} tabIndex={0} aria-label="문의사항" title="문의사항">문의사항</Link>
+                <Link to="/messages" onClick={() => setIsNavOpen(false)} tabIndex={0} aria-label="쪽지함" title="쪽지함">쪽지함</Link>
                 {isAdmin && (
                   <Link to="/admin" className="admin-link" onClick={() => setIsNavOpen(false)} tabIndex={0} aria-label="관리자" title="관리자">관리자</Link>
                 )}
@@ -177,6 +181,8 @@ function App() {
                 <Route path="/chat" element={<ChatListPage userInfo={userInfo} />} />
                 <Route path="/chat/:roomId" element={<ChatRoomPage userInfo={userInfo} />} />
                 <Route path="/mypage" element={<MyPage userInfo={userInfo} onProfileUpdate={handleProfileUpdate} />} />
+                <Route path="/messages" element={<MessagesPage userInfo={userInfo} />} />
+                <Route path="/my-messages" element={<MyMessagesPage />} />
                 <Route path="/inquiries" element={<InquiriesPage userInfo={userInfo} isAdmin={isAdmin} />} />
                 {isAdmin && <Route path="/admin" element={<AdminPage />} />}
                 <Route path="*" element={<Navigate to="/" />} />

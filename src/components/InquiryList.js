@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { collection, getDocs, query, orderBy, doc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
-const InquiryList = ({ refreshKey, userInfo }) => {
+const InquiryList = ({ refreshKey, userInfo, isAdmin }) => {
   const [inquiries, setInquiries] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editingContent, setEditingContent] = useState('');
@@ -91,10 +91,49 @@ const InquiryList = ({ refreshKey, userInfo }) => {
               <>
                 <p>{inquiry.content}</p>
                 <small>작성자: {inquiry.userName || '익명'}</small>
-                {userInfo?.uid === inquiry.userId && (
+                {console.log("🔍 현재 사용자 UID:", userInfo?.uid, "| 문의 작성자 UID:", inquiry.userId)}
+                {(isAdmin || (userInfo?.uid && inquiry.userId === userInfo.uid)) && (
                   <div className="inquiry-actions">
-                    <button onClick={() => handleEdit(inquiry.id, inquiry.content)}>수정</button>
+                    {!isAdmin && <button onClick={() => handleEdit(inquiry.id, inquiry.content)}>수정</button>}
                     <button onClick={() => handleDelete(inquiry.id)}>삭제</button>
+                  </div>
+                )}
+                {/* 답변 표시 */}
+                {inquiry.reply && (
+                  <div className="inquiry-reply-display">
+                    <strong>답변:</strong>
+                    <p>{inquiry.reply}</p>
+                  </div>
+                )}
+                {/* 관리자 답변 입력 */}
+                {isAdmin && (
+                  <div className="inquiry-reply">
+                    <textarea
+                      placeholder="답변을 입력해주세요"
+                      value={inquiry.reply || ''}
+                      onChange={(e) => {
+                        const updated = [...inquiries];
+                        const target = updated.find(i => i.id === inquiry.id);
+                        if (target) target.reply = e.target.value;
+                        setInquiries(updated);
+                      }}
+                    />
+                    <button
+                      onClick={async () => {
+                        try {
+                          await updateDoc(doc(db, 'inquiries', inquiry.id), {
+                            reply: inquiry.reply,
+                            replyAt: serverTimestamp(),
+                          });
+                          alert('답변이 저장되었습니다.');
+                        } catch (err) {
+                          alert('답변 저장 실패');
+                          console.error(err);
+                        }
+                      }}
+                    >
+                      답변 저장
+                    </button>
                   </div>
                 )}
               </>

@@ -10,6 +10,19 @@ import {
 import { Picker } from 'emoji-mart';
 import Modal from 'react-modal';
 
+function getHighlightedText(text, highlight) {
+  if (!highlight.trim()) return text;
+  const regex = new RegExp(`(${highlight})`, "gi");
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.filter(Boolean).map((part, i) =>
+        regex.test(part) ? <mark key={i}>{part}</mark> : part
+      )}
+    </>
+  );
+}
+
 Modal.setAppElement('#root');
 
 const ChatRoomPage = ({ userInfo }) => {
@@ -25,7 +38,12 @@ const ChatRoomPage = ({ userInfo }) => {
   const [showNoticeModal, setShowNoticeModal] = useState(false);
   const [noticeList, setNoticeList] = useState([]);
   const [newNotice, setNewNotice] = useState({ title: '', content: '' });
+  const [searchTerm, setSearchTerm] = useState('');
   const messagesEndRef = useRef(null);
+  // messages 상태로부터 필터링된 메시지 리스트 생성
+  const filteredMessages = messages.filter(msg =>
+  msg.text?.toLowerCase().includes(searchTerm.toLowerCase())
+);
   const currentUser = auth.currentUser;
   const [showPollModal, setShowPollModal] = useState(false);
   const [pollList, setPollList] = useState([]);
@@ -209,36 +227,24 @@ const ChatRoomPage = ({ userInfo }) => {
 
   // 메시지 전송 (400 오류 방지: 필수값 체크)
   const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !currentUser || !roomId || !userInfo?.nickname) {
-      alert("메시지 내용과 사용자 정보가 필요합니다.");
-      return;
-    }
-    try {
-      console.log("전송 데이터 확인:", { text: newMessage, uid: currentUser.uid, userName: userInfo.nickname, roomId });
-      await addDoc(collection(db, "chatRooms", roomId, "messages"), {
-        text: newMessage,
-        createdAt: serverTimestamp(),
-        uid: currentUser.uid,
-        userName: userInfo.nickname
-      });
-      await updateDoc(doc(db, "chatRooms", roomId), {
-        lastMessage: newMessage,
-        updatedAt: serverTimestamp(),
-        [`lastRead.${currentUser.uid}`]: new Date()
-      });
-      setNewMessage('');
-    } catch (error) {
-      console.error("메시지 전송 오류:", error);
-      if (error.code === 'permission-denied') {
-        alert("Firestore 권한이 부족합니다. 규칙을 확인하세요.");
-      } else if (error.code === 'resource-exhausted') {
-        alert("요청이 제한되었습니다. 잠시 후 다시 시도하세요.");
-      } else {
-        alert("메시지 전송 중 오류가 발생했습니다.");
-      }
-    }
-  };
+  e.preventDefault();
+  if (!newMessage.trim() || !currentUser?.uid || !userInfo?.nickname) {
+    alert("메시지 내용 또는 사용자 정보가 올바르지 않습니다.");
+    return;
+  }
+  try {
+    await addDoc(collection(db, "chatRooms", roomId, "messages"), {
+      text: newMessage,
+      createdAt: serverTimestamp(),
+      uid: currentUser.uid,
+      userName: userInfo.nickname
+    });
+    setNewMessage('');
+  } catch (err) {
+    alert("채팅 메시지 전송 중 오류가 발생했습니다.");
+    console.error("채팅 오류:", err);
+  }
+};
 
   const handleUserClick = async (uid) => {
     try {
@@ -602,16 +608,51 @@ const ChatRoomPage = ({ userInfo }) => {
   </div>
 </Modal>
 
+{/* 검색창 추가 위치 */}
+<div style={{ margin: '12px 0' }}>
+  <input
+    type="text"
+    value={searchTerm}
+    onChange={(e) => setSearchTerm(e.target.value)}
+    placeholder="채팅 내용 검색..."
+    aria-label="채팅 검색창"
+    style={{
+      width: '100%',
+      padding: '8px',
+      fontSize: '1rem',
+      border: '1px solid #ccc',
+      borderRadius: '6px'
+    }}
+  />
+</div>
+
+{/* 기존: 메시지 리스트 출력 */}
+{filteredMessages.map(msg => (
+  <div key={msg.id} className="message">
+    {/* 메시지 내용 출력 */}
+  </div>
+))}
+
       {/* --- 채팅 메시지 --- */}
-      <div className="chat-box">
-        {messages.map(msg => (
-          <div key={msg.id} className={`message-wrapper ${msg.uid === currentUser?.uid ? 'sent' : 'received'}`}>
-            {msg.uid !== currentUser?.uid && <div className="message-sender">{msg.userName}</div>}
-            <div className="message-bubble"><div className="message-text">{msg.text}</div></div>
+   <div className="chat-box">
+  {filteredMessages.length === 0 ? (
+    <div className="no-results" style={{ color: "#888", textAlign: "center", margin: "20px 0" }}>
+      검색 결과가 없습니다.
+    </div>
+  ) : (
+    filteredMessages.map(msg => (
+      <div key={msg.id} className={`message-wrapper ${msg.uid === currentUser?.uid ? 'sent' : 'received'}`}>
+        {msg.uid !== currentUser?.uid && <div className="message-sender">{msg.userName}</div>}
+        <div className="message-bubble">
+          <div className="message-text">
+            {getHighlightedText(msg.text, searchTerm)}
           </div>
-        ))}
-        <div ref={messagesEndRef} />
+        </div>
       </div>
+    ))
+  )}
+  <div ref={messagesEndRef} />
+</div>
 
       {/* --- 메시지 입력창 --- */}
       <div className="chat-input-container">

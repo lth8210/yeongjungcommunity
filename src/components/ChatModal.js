@@ -25,17 +25,23 @@ const ChatModal = ({ open, onClose, fromUser, toUser }) => {
   }, [messages]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
-    const ids = [fromUser.uid, toUser.uid].sort();
-    const roomId = ids.join('_');
-    await addDoc(collection(db, "directChats", roomId, "messages"), {
-      from: fromUser.uid,
-      to: toUser.uid,
-      content: input,
-      createdAt: serverTimestamp(),
-    });
-    setInput('');
-  };
+  if (!input.trim()) return;
+  if (!fromUser?.uid || !toUser?.uid) {
+    alert("보내는 사람 또는 받는 사람 정보가 올바르지 않습니다.");
+    return;
+  }
+  const ids = [fromUser.uid, toUser.uid].sort();
+  const roomId = ids.join('_');
+  await addDoc(collection(db, "directChats", roomId, "messages"), {
+  text: input,
+  createdAt: serverTimestamp(),
+  uid: fromUser.uid,
+  userName: fromUser.nickname || fromUser.email || fromUser.name || "",
+  to: toUser.uid,
+  from: fromUser.uid
+});
+  setInput('');
+};
 
   if (!open) return null;
 
@@ -59,7 +65,7 @@ const ChatModal = ({ open, onClose, fromUser, toUser }) => {
                 maxWidth:"70%",
                 wordBreak:"break-all"
               }}>
-                {msg.content}
+                {msg.text}
               </span>
             </div>
           ))}
