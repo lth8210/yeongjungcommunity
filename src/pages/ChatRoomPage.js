@@ -55,8 +55,6 @@ const ChatRoomPage = ({ userInfo }) => {
   const [isJoining, setIsJoining] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const [creatingPoll, setCreatingPoll] = useState(false);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
   const [newPoll, setNewPoll] = useState({
     title: '',
     options: ['', ''],
@@ -153,24 +151,7 @@ const ChatRoomPage = ({ userInfo }) => {
         const data = roomSnap.data();
         const isParticipant = data.participants?.includes(currentUser.uid);
         const isCreator = data.createdBy === currentUser.uid;
-        if (!isParticipant && !isCreator) {
-          if (data.isPrivate) {
-            const inputPassword = prompt("이 채팅방은 비공개입니다. 비밀번호를 입력하세요:");
-            if (inputPassword === null) {
-              alert("입장이 취소되었습니다.");
-              navigate('/chat');
-              return;
-            }
-            if (inputPassword !== data.password) {
-              alert("비밀번호가 일치하지 않습니다.");
-              navigate('/chat');
-              return;
-            }
-          } else {
-            alert("초대 수락 후 입장할 수 있습니다.");
-            navigate('/chat');
-            return;
-          }
+        if (!isParticipant && !isCreator) { 
         }
         setRoomInfo(data);
         await updateDoc(roomRef, {
@@ -400,59 +381,21 @@ const ChatRoomPage = ({ userInfo }) => {
 
   // 참여자가 아닌 경우, 입장 조건 확인 로직
   if (!roomInfo || !roomInfo.participants?.includes(currentUser.uid)) {
-    const handleEntryCheck = () => {
-      if (!roomInfo) return <BlockedScreen message="존재하지 않는 채팅방입니다." />;
-      if (roomInfo.maxParticipants && roomInfo.participants.length >= roomInfo.maxParticipants) {
-        return <BlockedScreen message="채팅방 정원이 가득 찼습니다." />;
-      }
-      if (roomInfo.isPrivate && !roomInfo.participants?.includes(currentUser.uid)) {
-        return (
-          <Modal
-            isOpen={true}
-            onRequestClose={() => navigate('/chat')}
-            style={{
-              overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 },
-              content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '300px', padding: '20px', borderRadius: '10px' }
-            }}
-          >
-            <h3>비공개 채팅방</h3>
-            <p>비밀번호를 입력하세요:</p>
-            <input
-              type="password"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              style={{ width: '100%', padding: '8px', marginBottom: '10px' }}
-              aria-label="비밀번호 입력"
-            />
-            <button
-              onClick={async () => {
-                if (passwordInput === roomInfo.password) {
-                  await handleJoinRoom();
-                  setShowPasswordModal(false);
-                } else {
-                  alert("비밀번호가 일치하지 않습니다.");
-                }
-              }}
-              style={{ padding: '8px 12px', background: '#0d6efd', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-            >
-              확인
-            </button>
-            <button
-              onClick={() => navigate('/chat')}
-              style={{ marginLeft: '10px', padding: '8px 12px', background: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-            >
-              취소
-            </button>
-          </Modal>
-        );
-      }
-      if (!roomInfo.isPrivate && !roomInfo.participants.includes(currentUser.uid)) {
-        return <BlockedScreen message="초대 후 입장할 수 있는 채팅방입니다." />;
-      }
-      return <BlockedScreen message="아직 이 채팅방에 참여하지 않았습니다." />;
-    };
-    return handleEntryCheck();
-  }
+  // 여기가 입장 조건 확인 로직입니다.
+  const handleEntryCheck = () => {
+    if (!roomInfo) return <BlockedScreen message="존재하지 않는 채팅방입니다." />;
+    // 1. 인원 제한 체크 추가 (가장 먼저!)
+    if (roomInfo.maxParticipants && roomInfo.participants.length >= roomInfo.maxParticipants) {
+      return <BlockedScreen message="채팅방 정원이 가득 찼습니다." />;
+    }
+    // 2. 초대 후 입장 등 기타 조건
+    if (!roomInfo.participants.includes(currentUser.uid)) {
+      return <BlockedScreen message="초대 후 입장할 수 있는 채팅방입니다." />;
+    }
+    return <BlockedScreen message="아직 이 채팅방에 참여하지 않았습니다." />;
+  };
+  return handleEntryCheck();
+}
 
   const chatTitle = roomInfo?.isGroupChat ? roomInfo?.roomName || '그룹 채팅방' : roomInfo?.participantNicknames?.find(nick => nick !== userInfo?.nickname) || '1:1 대화';
 
@@ -560,6 +503,9 @@ const ChatRoomPage = ({ userInfo }) => {
   <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>
     채팅방에 함께 참여 중인 사람들입니다.
   </div>
+  <div style={{ fontSize: '12px', color: '#666' }}>
+  {roomInfo.participants.length} / {roomInfo.maxParticipants || '무제한'}명 참여중
+</div>
   <div style={{ maxHeight: '70vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
     {roomInfo?.participantNames?.map((name, idx) => (
       <span key={idx} style={{

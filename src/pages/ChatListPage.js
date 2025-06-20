@@ -23,9 +23,7 @@ const ChatListPage = ({ userInfo }) => {
   const [loading, setLoading] = useState(true);
   const [showCreateRoomModal, setShowCreateRoomModal] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
-  // ChatListPage.js 내부 상태 추가
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [password, setPassword] = useState('');
+  const [maxParticipants, setMaxParticipants] = useState('');
   const navigate = useNavigate();
   const currentUser = auth.currentUser;
 
@@ -115,13 +113,13 @@ const ChatListPage = ({ userInfo }) => {
   // handleCreateFreeRoom 함수 내부 수정
 const handleCreateFreeRoom = async () => {
   if (!newRoomName.trim()) return alert("채팅방 이름을 입력해주세요.");
-  if (isPrivate && !password.trim()) return alert("비공개 채팅방은 비밀번호가 필요합니다.");
+  // 인원 제한 체크
+  if (maxParticipants && isNaN(Number(maxParticipants))) return alert("최대 인원은 숫자로 입력하세요!");
 
   try {
     const roomRef = await addDoc(collection(db, "chatRooms"), {
       roomName: newRoomName,
-      isPrivate,
-      password: isPrivate ? password.trim() : null,
+      maxParticipants: maxParticipants ? Number(maxParticipants) : null, // 인원 제한 필드 추가
       createdBy: currentUser.uid,
       participantNames: [userInfo.name],
       participantNicknames: [userInfo.nickname],
@@ -132,8 +130,7 @@ const handleCreateFreeRoom = async () => {
     });
     setShowCreateRoomModal(false);
     setNewRoomName('');
-    setIsPrivate(false);
-    setPassword('');
+    setMaxParticipants('');
     navigate(`/chat/${roomRef.id}`);
   } catch (err) {
     console.error("채팅방 생성 오류:", err);
@@ -163,7 +160,7 @@ const handleCreateFreeRoom = async () => {
                   cursor: 'pointer'
                 }}
               >
-                <strong>{room.isPrivate ? '🔒 ' : ''}{room.roomName}</strong>
+                <strong>{room.roomName}</strong>
                 <div style={{ fontSize: '12px', color: '#666' }}>{room.participants.length}명 참여중</div>
               </li>
             ))}
@@ -219,24 +216,13 @@ const handleCreateFreeRoom = async () => {
         onChange={(e) => setNewRoomName(e.target.value)}
       />
 
-      {/* ✅ 비공개 옵션 및 비밀번호 입력 */}
-      <label style={{ marginTop: '10px', display: 'block' }}>
-        <input
-          type="checkbox"
-          checked={isPrivate}
-          onChange={(e) => setIsPrivate(e.target.checked)}
-        /> 비공개 채팅방
-      </label>
-
-      {isPrivate && (
-        <input
-          type="password"
-          placeholder="비밀번호 입력"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ marginTop: '8px', width: '100%' }}
-        />
-      )}
+      <input
+  type="number"
+  placeholder="최대 인원 수 (예: 10, 비워두면 무제한)"
+  value={maxParticipants}
+  onChange={(e) => setMaxParticipants(e.target.value)}
+  style={{ marginTop: '8px', width: '100%' }}
+/>
 
       {/* 버튼 */}
       <div style={{ marginTop: '10px' }}>
