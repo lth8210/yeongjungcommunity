@@ -1,248 +1,548 @@
-// src/components/MeetingList.js
-
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { db, auth } from '../firebase';
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  getDocs, 
-  doc, 
-  deleteDoc, 
-  updateDoc, 
-  arrayUnion, 
+import { ADMIN_UIDS } from '../config';
+import {
+  collection,
+  query,
+  orderBy,
+  getDocs,
+  doc,
+  updateDoc,
+  arrayUnion,
   arrayRemove,
-  getDoc 
-} from "firebase/firestore";
+  deleteDoc,
+  addDoc,           // ✅ 추가
+  serverTimestamp,  // ✅ 추가
+} from 'firebase/firestore';
+import CommunityCard from './CommunityCard';
+import MessageModal from './MessageModal';
+import { findOrCreateOneToOneRoom } from '../utils/findOrCreateOneToOneRoom';
+import { useNavigate } from 'react-router-dom';
 
-// 신청자/참여자 정보를 표시하는 별도의 컴포넌트
-const ApplicantInfo = ({ uid, type, onApprove, onReject }) => {
-  const [userInfo, setUserInfo] = useState({ name: '불러오는 중...' });
-
-  useEffect(() => {
-    const fetchUserInfo = async () => {
-      try {
-        const userDocRef = doc(db, "users", uid);
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists()) {
-          setUserInfo(userDoc.data());
-        } else {
-          setUserInfo({ name: '알 수 없는 사용자' });
-        }
-      } catch (error) {
-        console.error("사용자 정보 조회 오류:", error);
-        setUserInfo({ name: '정보 조회 실패' });
-      }
-    };
-    fetchUserInfo();
-  }, [uid]);
-
-  return (
-    <li className="applicant-item">
-      <span>{userInfo.name || userInfo.email}</span>
-      {type === 'pending' && (
-        <div className="approval-buttons">
-          <button className="approve-button" onClick={() => onApprove(uid, userInfo.name || userInfo.email)}>승인</button>
-          <button className="reject-button" onClick={() => onReject(uid)}>거절</button>
-        </div>
-      )}
-    </li>
-  );
+const CATEGORYLABELS = {
+  hobby: '취미',
+  study: '학습',
+  volunteer: '봉사',
+  etc: '기타',
+};
+const CATEGORYDESCS = {
+  hobby: '취미 모임 (예: 독서, 음악, 운동 등)',
+  study: '학습 모임 (예: 스터디, 언어, 자격증 등)',
+  volunteer: '봉사 모임 (예: 지역사회, 나눔, 환경 등)',
+  etc: '기타 (위에 해당하지 않는 모임)',
 };
 
-
-const MeetingList = () => {
+const MeetingList = ({ userInfo }) => {
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  const [editingId, setEditingId] = useState(null);
-  const [updatedTitle, setUpdatedTitle] = useState('');
-  const [updatedDescription, setUpdatedDescription] = useState('');
-  const [updatedLocation, setUpdatedLocation] = useState('');
-  const [updatedMeetingTime, setUpdatedMeetingTime] = useState('');
-
+  const [usersMap, setUsersMap] = useState({});
+  const [messageModalOpen, setMessageModalOpen] = useState(false);
+  const [targetUser, setTargetUser] = useState(null);
+  const [isEditing, setIsEditing] = useState(null);
+  const [editedMeeting, setEditedMeeting] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
+  const navigate = useNavigate();
   const currentUser = auth.currentUser;
+  const isAdmin = currentUser && ADMIN_UIDS.includes(currentUser.uid);
 
-  const fetchMeetings = async () => {
-    try {
-      const q = query(collection(db, "meetings"), orderBy("createdAt", "desc"));
-      const querySnapshot = await getDocs(q);
-      const meetingsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setMeetings(meetingsData);
-    } catch (error) {
-      console.error("모임 목록 불러오기 중 오류: ", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const sendMessage = async (toUid, messageText) => {
+  if (!userInfo || !toUid || !messageText.trim()) return;
+  const ids = [userInfo.uid, toUid].sort();
+  const roomId = ids.join('_');
+  await addDoc(collection(db, 'directChats', roomId, 'messages'), {
+    text: messageText,
+    createdAt: serverTimestamp(),
+    uid: userInfo.uid,
+    userName: userInfo.nickname || userInfo.email || userInfo.name || '',
+    to: toUid,
+    from: userInfo.uid,
+  });
+};
 
   useEffect(() => {
+    const fetchMeetings = async () => {
+      setLoading(true);
+      try {
+        const q = query(collection(db, 'meetings'), orderBy('createdAt', 'desc'));
+        const querySnapshot = await getDocs(q);
+        const meetingsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setMeetings(meetingsData);
+      } catch (error) {
+        console.error('모임 목록 불러오기 오류:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchMeetings();
   }, []);
 
-  const handleDelete = async (id) => {
-    if (window.confirm("정말로 이 모임을 삭제하시겠습니까? 관련 채팅방도 함께 삭제됩니다.")) {
+  useEffect(() => {
+    const fetchUsersMap = async () => {
       try {
-        await deleteDoc(doc(db, "meetings", id));
-        await deleteDoc(doc(db, "chatRooms", id));
-        alert("모임과 관련 채팅방이 삭제되었습니다.");
-        fetchMeetings();
-      } catch (error) { console.error("모임 삭제 중 오류:", error); }
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const map = {};
+        usersSnap.docs.forEach(doc => {
+          const data = doc.data();
+          map[doc.id] = {
+            nickname: data.nickname,
+            name: data.name,
+          };
+        });
+        setUsersMap(map);
+      } catch (err) {
+        console.error('유저 맵 불러오기 오류:', err);
+      }
+    };
+    fetchUsersMap();
+  }, []);
+
+  const getApplicantObjects = (uids = []) =>
+    uids.map(uid => ({
+      uid,
+      nickname: usersMap[uid]?.nickname,
+      name: usersMap[uid]?.name,
+    }));
+
+  const formatAuthorName = uid => {
+    const user = usersMap[uid];
+    if (!user) return '';
+    return user.name ? `${user.name}${user.nickname ? `(${user.nickname})` : ''}` : user.nickname;
+  };
+
+  const handleApply = async meetingId => {
+    if (!currentUser) return alert('로그인 후 신청할 수 있습니다.');
+    try {
+      await updateDoc(doc(db, 'meetings', meetingId), {
+        pendingApplicants: arrayUnion(currentUser.uid),
+      });
+      setMeetings(meetings =>
+        meetings.map(m =>
+          m.id === meetingId
+            ? { ...m, pendingApplicants: [...(m.pendingApplicants || []), currentUser.uid] }
+            : m
+        )
+      );
+      alert('신청이 완료되었습니다!');
+    } catch (err) {
+      alert('신청 실패');
+      console.error(err);
     }
   };
 
-  const handleSave = async (id) => {
-    if (!updatedTitle || !updatedDescription || !updatedLocation || !updatedMeetingTime) {
-      alert("모든 필드를 입력해주세요.");
+  const handleApproveApplicant = async (meetingId, applicantId) => {
+    if (!isAdmin && (!currentUser || currentUser.uid !== meetings.find(m => m.id === meetingId)?.hostId)) {
+      return alert('승인 권한이 없습니다.');
+    }
+    try {
+      await updateDoc(doc(db, 'meetings', meetingId), {
+        applicants: arrayUnion(applicantId),
+        pendingApplicants: arrayRemove(applicantId),
+      });
+      setMeetings(meetings =>
+        meetings.map(m =>
+          m.id === meetingId
+            ? {
+                ...m,
+                applicants: [...(m.applicants || []), applicantId],
+                pendingApplicants: (m.pendingApplicants || []).filter(uid => uid !== applicantId),
+              }
+            : m
+        )
+      );
+      alert('승인되었습니다!');
+    } catch (err) {
+      alert('승인 실패');
+      console.error(err);
+    }
+  };
+
+  const handleCancelApply = async meetingId => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, 'meetings', meetingId), {
+        pendingApplicants: arrayRemove(currentUser.uid),
+      });
+      setMeetings(meetings =>
+        meetings.map(m =>
+          m.id === meetingId
+            ? {
+                ...m,
+                pendingApplicants: (m.pendingApplicants || []).filter(uid => uid !== currentUser.uid),
+              }
+            : m
+        )
+      );
+      alert('신청이 취소되었습니다.');
+    } catch (err) {
+      alert('취소 실패');
+      console.error(err);
+    }
+  };
+
+  const handleComplete = async meetingId => {
+    if (!currentUser) return;
+    try {
+      await updateDoc(doc(db, 'meetings', meetingId), {
+        status: 'done',
+      });
+      setMeetings(meetings =>
+        meetings.map(m => (m.id === meetingId ? { ...m, status: 'done' } : m))
+      );
+      alert('모임이 완료 처리되었습니다.');
+    } catch (err) {
+      alert('완료 처리 실패');
+      console.error(err);
+    }
+  };
+
+  const handleEdit = meeting => {
+    setIsEditing(meeting.id);
+    setEditedMeeting({
+      ...meeting,
+      category: meeting.category || 'etc',
+      title: meeting.title || '',
+      description: meeting.description || '',
+      location: meeting.location || '',
+      meetingTime: meeting.meetingTime || '',
+    });
+  };
+
+  const handleSave = async meetingId => {
+    if (!currentUser) {
+      alert('로그인 후 수정할 수 있습니다.');
+      return;
+    }
+    if (isSaving) return;
+    setIsSaving(true);
+    const isAuthor = currentUser.uid === editedMeeting.hostId;
+    if (!isAuthor && !isAdmin) {
+      alert('수정 권한이 없습니다.');
+      setIsSaving(false);
       return;
     }
     try {
-      const meetingDoc = doc(db, "meetings", id);
-      const chatRoomDoc = doc(db, "chatRooms", id);
-      await updateDoc(meetingDoc, { title: updatedTitle, description: updatedDescription, location: updatedLocation, meetingTime: updatedMeetingTime });
-      await updateDoc(chatRoomDoc, { roomName: updatedTitle });
-      alert("모임 정보가 수정되었습니다.");
-      setEditingId(null);
-      fetchMeetings();
-    } catch (error) { console.error("모임 수정 중 오류:", error); }
+      const meetingRef = doc(db, 'meetings', meetingId);
+      await updateDoc(meetingRef, {
+        title: editedMeeting.title,
+        description: editedMeeting.description,
+        location: editedMeeting.location,
+        meetingTime: editedMeeting.meetingTime,
+        category: editedMeeting.category || 'etc',
+      });
+      setMeetings(meetings =>
+        meetings.map(m =>
+          m.id === meetingId ? { ...m, ...editedMeeting } : m
+        )
+      );
+      setIsEditing(null);
+      setEditedMeeting({});
+      alert('수정이 완료되었습니다!');
+    } catch (error) {
+      console.error('수정 오류:', error);
+      alert('수정 실패: ' + (error.message || '알 수 없는 오류'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleEdit = (meeting) => {
-    setEditingId(meeting.id);
-    setUpdatedTitle(meeting.title);
-    setUpdatedDescription(meeting.description);
-    setUpdatedLocation(meeting.location);
-    setUpdatedMeetingTime(meeting.meetingTime);
+  const handleCancelEdit = () => {
+    setIsEditing(null);
+    setEditedMeeting({});
+    setIsSaving(false);
   };
 
-  const handleCancel = () => { setEditingId(null); };
+  const handleDelete = async meetingId => {
+    if (!window.confirm('정말로 삭제하시겠습니까?')) return;
+    try {
+      await deleteDoc(doc(db, 'meetings', meetingId));
+      setMeetings(meetings => meetings.filter(m => m.id !== meetingId));
+      alert('삭제되었습니다.');
+    } catch (err) {
+      alert('삭제 실패');
+      console.error(err);
+    }
+  };
 
-  const handleApply = async (id) => {
-  const user = auth.currentUser;
-  if (!user) return;
+  const openMessageModal = userObj => {
+    setTargetUser(userObj);
+    setMessageModalOpen(true);
+  };
 
-  const meetingRef = doc(db, "meetings", id);
-  const meetingSnap = await getDoc(meetingRef);
-  const meetingData = meetingSnap.data();
+  const closeMessageModal = () => {
+    setMessageModalOpen(false);
+    setTargetUser(null);
+  };
 
-  const max = meetingData.maxParticipants;
-  const current = meetingData.applicants?.length || 0;
+  const handleEnterGroupChat = (roomId) => {
+  if (!roomId) {
+    alert("연결된 채팅방 정보가 없습니다.");
+    return;
+  }
+  navigate(`/chat/${roomId}`);
+};
 
-  if (max && current >= max) {
-    alert("해당 모임은 최대 인원에 도달했습니다.");
+const handleChat = async (userObj) => {
+  if (!userInfo) return;
+
+  // 그룹채팅/모임채팅: groupId가 있으면 그룹채팅방으로 이동
+  if (userObj && (userObj.type === 'group' || userObj.groupId)) {
+    const groupId = userObj.groupId || userObj.meetingId || userObj.id;
+    navigate(`/chat/group/${groupId}`);
     return;
   }
 
-  await updateDoc(meetingRef, {
-    pendingApplicants: arrayUnion(user.uid),
-  });
-  alert("모임 신청 완료. 승인을 기다려주세요.");
-  fetchMeetings();
+  // 1:1 채팅방
+  if (userObj && userObj.uid) {
+    if (userObj.uid === userInfo.uid) return;
+    try {
+      const myUid = userInfo.uid;
+      const myName = userInfo.name || userInfo.nickname || userInfo.email;
+      const myNickname = userInfo.nickname || userInfo.name || userInfo.email;
+      const otherUid = userObj.uid;
+      const otherName = userObj.name || userObj.nickname || userObj.email;
+      const otherNickname = userObj.nickname || userObj.name || userObj.email;
+      const roomId = await findOrCreateOneToOneRoom(
+        myUid,
+        myName,
+        myNickname,
+        otherUid,
+        otherName,
+        otherNickname
+      );
+      navigate(`/chat/${roomId}`);
+    } catch (err) {
+      alert('채팅방 생성 실패');
+      console.error(err);
+    }
+    return;
+  }
+  alert('채팅 상대 정보가 올바르지 않습니다.');
 };
 
-  const handleCancelApply = async (id) => {
-    const user = auth.currentUser;
-    if (!user) return;
-    try {
-      await updateDoc(doc(db, "meetings", id), { pendingApplicants: arrayRemove(user.uid) });
-      alert("신청이 취소되었습니다.");
-      fetchMeetings();
-    } catch (error) { console.error("신청 취소 중 오류:", error); }
-  };
+  if (loading)
+    return (
+      <div style={{ textAlign: 'center', padding: 20 }}>로딩 중...</div>
+    );
 
-  const handleApprove = async (meetingId, userId, userName) => {
-    try {
-      await updateDoc(doc(db, "meetings", meetingId), { pendingApplicants: arrayRemove(userId), applicants: arrayUnion(userId) });
-      await updateDoc(doc(db, "chatRooms", meetingId), { participants: arrayUnion(userId), participantNames: arrayUnion(userName) });
-      alert(`${userName}님의 신청을 승인했습니다.`);
-      fetchMeetings();
-    } catch (error) { console.error("승인 처리 중 오류:", error); }
-  };
-
-  const handleReject = async (meetingId, userId) => {
-    try {
-      await updateDoc(doc(db, "meetings", meetingId), { pendingApplicants: arrayRemove(userId) });
-      alert("신청을 거절했습니다.");
-      fetchMeetings();
-    } catch (error) { console.error("거절 처리 중 오류:", error); }
-  };
-
-  const formatMeetingTime = (isoString) => {
-    if (!isoString) return '';
-    return new Date(isoString).toLocaleString('ko-KR'); 
-  };
-
-  if (loading) return <div>목록을 불러오는 중...</div>;
+  if (meetings.length === 0)
+    return (
+      <div style={{ textAlign: 'center', padding: 20, color: '#666' }}>
+        <p>등록된 모임이 없습니다.</p>
+      </div>
+    );
 
   return (
-    <>
-      {meetings.length === 0 ? (
-        <div className="empty-message-card card">
-          <p>아직 개설된 모임이 없습니다. 첫 모임을 만들어보세요!</p>
-        </div>
-      ) : (
-        meetings.map(meeting => {
-          const isPending = currentUser && meeting.pendingApplicants?.includes(currentUser.uid);
-          const isApplicant = currentUser && meeting.applicants.includes(currentUser.uid);
-          const isHost = currentUser && currentUser.uid === meeting.hostId;
+    <div>
+      {meetings.map(meeting => {
+        const isApplicant = (meeting.applicants || []).includes(currentUser?.uid);
+        const isAuthor = currentUser && currentUser.uid === meeting.hostId;
+        const canEdit = isAuthor || isAdmin;
+        const editing = isEditing === meeting.id;
+        const applicants = getApplicantObjects(meeting.applicants || []);
+        const pendingApplicants = getApplicantObjects(meeting.pendingApplicants || []);
+        const authorName = formatAuthorName(meeting.hostId);
 
-          return (
-            <div key={meeting.id} className="meeting-item">
-              {editingId === meeting.id && isHost ? (
-                <div className="edit-form">
-                  <input type="text" value={updatedTitle} onChange={e => setUpdatedTitle(e.target.value)} />
-                  <textarea value={updatedDescription} onChange={e => setUpdatedDescription(e.target.value)}></textarea>
-                  <input type="text" value={updatedLocation} onChange={e => setUpdatedLocation(e.target.value)} />
-                  <input type="datetime-local" value={updatedMeetingTime} onChange={e => setUpdatedMeetingTime(e.target.value)} />
-                  <div className="button-group">
-                    <button className="save-button" onClick={() => handleSave(meeting.id)}>저장</button>
-                    <button className='cancel-button' onClick={handleCancel}>취소</button>
-                  </div>
-                </div>
+        return (
+          <CommunityCard
+            key={meeting.id}
+            meetingId={meeting.id}
+            title={
+              editing ? (
+                <input
+                  value={editedMeeting.title}
+                  onChange={e =>
+                    setEditedMeeting({ ...editedMeeting, title: e.target.value })
+                  }
+                  style={{
+                    width: '100%',
+                    padding: 6,
+                    borderRadius: 4,
+                    border: '1px solid #ccc',
+                  }}
+                />
               ) : (
-                <>
-                  <h4><Link to={`/meeting/${meeting.id}`}>{meeting.title}</Link></h4>
-                  <p>{meeting.description}</p>
-                  <div className="meeting-details">
-                    <span><strong>장소:</strong> {meeting.location}</span>
-                    <span><strong>시간:</strong> {formatMeetingTime(meeting.meetingTime)}</span>
-                    <span><strong>주최자:</strong> {meeting.hostName}</span>
-                    <span><strong>제한:</strong> {meeting.maxParticipants ? `${meeting.maxParticipants}명` : '제한 없음'}</span> {/* ✅ 추가 */}
-                  </div>
-                  
-                  <div className="interaction-area">
-                    <span className="applicant-count">
-                      참여 인원: {meeting.applicants.length}명
-                      {meeting.pendingApplicants?.length > 0 && ` (대기 ${meeting.pendingApplicants.length}명)`}
-                    </span>
-                    <div className="button-group">
-                      {!isHost && !isApplicant && !isPending && ( <button className="apply-button" onClick={() => handleApply(meeting.id)}>신청하기</button> )}
-                      {!isHost && isPending && ( <button className="cancel-apply-button" onClick={() => handleCancelApply(meeting.id)}>신청 취소</button> )}
-                      {!isHost && isApplicant && ( <span className="status-text">참여 확정</span> )}
-                      {isHost && ( <> <button className="edit-button" onClick={() => handleEdit(meeting)}>수정</button> <button className="delete-button" onClick={() => handleDelete(meeting.id)}>삭제</button> </> )}
-                    </div>
-                  </div>
-
-                  {isHost && meeting.pendingApplicants?.length > 0 && (
-                    <div className="applicant-list pending-list">
-                      <strong>신청 대기자 목록:</strong>
-                      <ul>{meeting.pendingApplicants.map(uid => <ApplicantInfo key={uid} uid={uid} type="pending" onApprove={(userId, userName) => handleApprove(meeting.id, userId, userName)} onReject={() => handleReject(meeting.id, uid)}/>)}</ul>
+                meeting.title
+              )
+            }
+            content={
+              editing ? (
+                <textarea
+                  value={editedMeeting.description}
+                  onChange={e =>
+                    setEditedMeeting({
+                      ...editedMeeting,
+                      description: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: '100%',
+                    minHeight: 80,
+                    padding: 6,
+                    borderRadius: 4,
+                    border: '1px solid #ccc',
+                  }}
+                />
+              ) : (
+                meeting.description
+              )
+            }
+            thumbnail={
+              meeting.files && meeting.files.length > 0
+                ? meeting.files[0].url
+                : null
+            }
+            location={
+              editing ? (
+                <input
+                  value={editedMeeting.location}
+                  onChange={e =>
+                    setEditedMeeting({
+                      ...editedMeeting,
+                      location: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: '100%',
+                    padding: 6,
+                    borderRadius: 4,
+                    border: '1px solid #ccc',
+                  }}
+                />
+              ) : (
+                meeting.location
+              )
+            }
+            category={
+              editing ? (
+                <select
+                  value={editedMeeting.category || 'etc'}
+                  onChange={e =>
+                    setEditedMeeting({
+                      ...editedMeeting,
+                      category: e.target.value,
+                    })
+                  }
+                  style={{
+                    width: '100%',
+                    padding: 6,
+                    borderRadius: 4,
+                    border: '1px solid #ccc',
+                  }}
+                >
+                  {Object.keys(CATEGORYLABELS).map(key => (
+                    <option key={key} value={key}>
+                      {CATEGORYLABELS[key]}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                CATEGORYLABELS[meeting.category] || '기타'
+              )
+            }
+            status={meeting.status}
+            applicants={applicants}
+            pendingApplicants={pendingApplicants}
+            authorName={authorName}
+            authorId={meeting.hostId}
+            usersMap={usersMap}
+            currentUser={userInfo}
+            onApply={() => handleApply(meeting.id)}
+            onCancelApply={() => handleCancelApply(meeting.id)}
+            onApprove={applicantId => handleApproveApplicant(meeting.id, applicantId)}
+            onComplete={() => handleComplete(meeting.id)}
+            onEdit={() => handleEdit(meeting)}
+            onDelete={() => handleDelete(meeting.id)}
+            onMessage={openMessageModal}
+            onChat={handleChat}
+            isGroupChat={meeting.isGroupChat}
+            onEnterGroupChat={() => handleEnterGroupChat(meeting.chatRoomId)}
+            id={meeting.id}
+            isApplicant={isApplicant}
+            isAuthor={isAuthor}
+            isAdmin={isAdmin}
+            extraFields={
+              <div style={{ color: '#666', fontSize: 13, marginBottom: 4 }}>
+                {meeting.location}
+                {' | '}
+                {meeting.meetingTime
+                  ? new Date(meeting.meetingTime).toLocaleString()
+                  : ''}
+                {isAuthor &&
+                  meeting.pendingApplicants &&
+                  meeting.pendingApplicants.length > 0 && (
+                    <div>
+                      <strong>승인 대기:</strong>
+                      {pendingApplicants.map(user => (
+                        <button
+                          key={user.uid}
+                          onClick={() => handleApproveApplicant(meeting.id, user.uid)}
+                          style={{
+                            marginLeft: 8,
+                            padding: '2px 8px',
+                            fontSize: 12,
+                            background: '#e9ecef',
+                            border: 'none',
+                            borderRadius: 4,
+                          }}
+                        >
+                          {user.nickname || user.name}
+                        </button>
+                      ))}
                     </div>
                   )}
-                  {isHost && meeting.applicants.length > 0 && (
-                    <div className="applicant-list">
-                      <strong>최종 참여자 목록:</strong>
-                      <ul>{meeting.applicants.map(uid => <ApplicantInfo key={uid} uid={uid} type="approved" />)}</ul>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })
+              </div>
+            }
+          >
+            {canEdit && editing && (
+              <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => handleSave(meeting.id)}
+                  style={{
+                    padding: '8px 20px',
+                    background: isSaving ? '#999' : '#1976d2',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 17,
+                    fontWeight: 'bold',
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                  }}
+                  disabled={isSaving}
+                  aria-disabled={isSaving}
+                >
+                  {isSaving ? '저장 중...' : '저장'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  style={{
+                    padding: '8px 20px',
+                    background: '#ccc',
+                    border: 'none',
+                    borderRadius: 6,
+                    fontSize: 17,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                >
+                  취소
+                </button>
+              </div>
+            )}
+          </CommunityCard>
+        );
+      })}
+      {messageModalOpen && targetUser && (
+        <MessageModal
+          open={messageModalOpen}
+          onClose={closeMessageModal}
+          fromUser={userInfo}
+          toUser={{ uid: targetUser.uid, nickname: targetUser.nickname }}
+          onSend={sendMessage}
+        />
       )}
-    </>
+    </div>
   );
 };
 

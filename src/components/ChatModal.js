@@ -71,28 +71,34 @@ const ChatModal = ({ open, onClose, fromUser, toUser }) => {
           ))}
           <div ref={messagesEndRef} />
         </div>
-        <div style={{display:"flex", gap:"8px"}}>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder="메시지 입력"
-            aria-label="메시지 입력"
-            style={{flex:1, padding:"8px", borderRadius:"6px", border:"1px solid #ccc"}}
-            onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
-          />
-          <button
-            onClick={handleSend}
-            style={{background:"#20c997", color:"#fff", border:"none", borderRadius:"6px", padding:"6px 16px", fontWeight:600}}
-            aria-label="메시지 전송"
-            title="메시지 전송"
-          >전송</button>
-          <button
-            onClick={onClose}
-            style={{background:"#aaa", color:"#fff", border:"none", borderRadius:"6px", padding:"6px 16px"}}
-            aria-label="닫기"
-            title="닫기"
-          >닫기</button>
-        </div>
+        <form
+  style={{display:"flex", gap:"8px"}}
+  onSubmit={e => {
+    e.preventDefault(); // 기본 제출 방지
+    handleSend();
+  }}
+>
+  <input
+    value={input}
+    onChange={e => setInput(e.target.value)}
+    placeholder="메시지 입력"
+    aria-label="메시지 입력"
+    style={{flex:1, padding:"8px", borderRadius:"6px", border:"1px solid #ccc"}}
+  />
+  <button
+    type="submit"
+    style={{background:"#20c997", color:"#fff", border:"none", borderRadius:"6px", padding:"6px 16px", fontWeight:600}}
+    aria-label="메시지 전송"
+    title="메시지 전송"
+  >전송</button>
+  <button
+    type="button"
+    onClick={onClose}
+    style={{background:"#aaa", color:"#fff", border:"none", borderRadius:"6px", padding:"6px 16px"}}
+    aria-label="닫기"
+    title="닫기"
+  >닫기</button>
+</form>
       </div>
     </div>
   );

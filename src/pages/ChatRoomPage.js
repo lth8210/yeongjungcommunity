@@ -1,5 +1,3 @@
-// src/pages/ChatRoomPage.js
-
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { db, auth } from '../firebase';
@@ -9,6 +7,21 @@ import {
 } from 'firebase/firestore';
 import { Picker } from 'emoji-mart';
 import Modal from 'react-modal';
+import ImageUploader from '../components/ImageUploader';
+
+Modal.setAppElement('#root');
+
+function groupMessagesByDate(messages) {
+  return messages.reduce((acc, msg) => {
+    const dateObj = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt);
+    const dateStr = dateObj.toLocaleDateString('ko-KR', {
+      year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'
+    });
+    if (!acc[dateStr]) acc[dateStr] = [];
+    acc[dateStr].push(msg);
+    return acc;
+  }, {});
+}
 
 function getHighlightedText(text, highlight) {
   if (!highlight.trim()) return text;
@@ -23,15 +36,12 @@ function getHighlightedText(text, highlight) {
   );
 }
 
-Modal.setAppElement('#root');
-
 const ChatRoomPage = ({ userInfo }) => {
   const { roomId } = useParams();
   const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [roomInfo, setRoomInfo] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
@@ -39,10 +49,53 @@ const ChatRoomPage = ({ userInfo }) => {
   const [noticeList, setNoticeList] = useState([]);
   const [newNotice, setNewNotice] = useState({ title: '', content: '' });
   const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [files, setFiles] = useState([]); // Cloudinary 업로드 완료된 파일 배열
+  const [uploading, setUploading] = useState(false); // 업로드 중 표시
+  const [uploadError, setUploadError] = useState(''); // 업로드 에러 메시지
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImageUrl, setSelectedImageUrl] = useState('');
+  const handleFileChange = async (e) => {
+  const filesArray = Array.from(e.target.files);
+  if (filesArray.length === 0) return;
+  setUploading(true);
+  setUploadError('');
+  const uploadedFiles = [];
+  try {
+    for (const file of filesArray) {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", "yeongjung_preset"); // Cloudinary preset
+      const res = await fetch("https://api.cloudinary.com/v1_1/dqrcyclit/auto/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.secure_url) {
+        uploadedFiles.push({
+          url: data.secure_url,
+          originalName: file.name,
+          type: file.type,
+          size: file.size,
+        });
+      } else {
+        throw new Error(data.error?.message || "Cloudinary 업로드 실패");
+      }
+    }
+    setFiles(uploadedFiles);
+  } catch (err) {
+    setUploadError("파일 업로드 중 오류가 발생했습니다: " + err.message);
+    setFiles([]);
+  } finally {
+    setUploading(false);
+  }
+};
   const messagesEndRef = useRef(null);
-  // messages 상태로부터 필터링된 메시지 리스트 생성
   const filteredMessages = messages.filter(msg =>
-  msg.text?.toLowerCase().includes(searchTerm.toLowerCase())
+  (msg.text && msg.text.toLowerCase().includes(searchTerm.toLowerCase())) ||
+  (msg.type === "notice" && msg.notice?.title?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+  (msg.type === "poll" && msg.poll?.title?.toLowerCase().includes(searchTerm.toLowerCase())) ||
+  (Array.isArray(msg.files) && msg.files.length > 0) // 파일만 있는 경우도 포함
 );
   const currentUser = auth.currentUser;
   const [showPollModal, setShowPollModal] = useState(false);
@@ -52,9 +105,46 @@ const ChatRoomPage = ({ userInfo }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [inviteTab, setInviteTab] = useState('search');
   const [notificationPermission, setNotificationPermission] = useState(Notification.permission);
-  const [isJoining, setIsJoining] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const [creatingPoll, setCreatingPoll] = useState(false);
+  const [noticeFiles, setNoticeFiles] = useState([]);
+  const [noticeUploading, setNoticeUploading] = useState(false);
+  const [noticeUploadError, setNoticeUploadError] = useState('');
+  const handleNoticeFileChange = async (e) => {
+  const filesArray = Array.from(e.target.files);
+  if (filesArray.length === 0) return;
+  setNoticeUploading(true);
+  setNoticeUploadError('');
+  const uploadedFiles = [];
+  try {
+    for (const file of filesArray) {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", "yeongjung_preset");
+      const res = await fetch("https://api.cloudinary.com/v1_1/dqrcyclit/auto/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.secure_url) {
+        uploadedFiles.push({
+          url: data.secure_url,
+          originalName: file.name,
+          type: file.type,
+          size: file.size,
+        });
+      } else {
+        throw new Error(data.error?.message || "Cloudinary 업로드 실패");
+      }
+    }
+    setNoticeFiles(uploadedFiles);
+  } catch (err) {
+    setNoticeUploadError("파일 업로드 중 오류가 발생했습니다: " + err.message);
+    setNoticeFiles([]);
+  } finally {
+    setNoticeUploading(false);
+  }
+};
   const [newPoll, setNewPoll] = useState({
     title: '',
     options: ['', ''],
@@ -64,6 +154,11 @@ const ChatRoomPage = ({ userInfo }) => {
     isAnonymous: false,
   });
 
+  const handleImageClick = (url) => {
+  setSelectedImageUrl(url);
+  setShowImageModal(true);
+};
+
   const menuItemStyle = {
     padding: '8px',
     cursor: 'pointer',
@@ -71,7 +166,6 @@ const ChatRoomPage = ({ userInfo }) => {
     fontSize: '14px'
   };
 
-  // 실시간 데이터 구독 및 상태 관리
   useEffect(() => {
     if (!roomId) return;
     const roomDocRef = doc(db, "chatRooms", roomId);
@@ -101,23 +195,20 @@ const ChatRoomPage = ({ userInfo }) => {
   }, [roomId, currentUser, roomInfo]);
 
   useEffect(() => {
-    if (!roomId) return;
-    const q = query(collection(db, "chatRooms", roomId, "messages"), orderBy("createdAt"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newMessages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-      if (document.hidden && newMessages.length > messages.length) {
-        const lastMessage = newMessages[newMessages.length - 1];
-        if (lastMessage.uid !== currentUser?.uid && notificationPermission === 'granted') {
-          new Notification(roomInfo?.roomName || '새 메시지', {
-            body: `${lastMessage.userName}: ${lastMessage.text}`,
-            tag: roomId,
-          });
-        }
-      }
-      setMessages(newMessages);
-    }, (error) => console.error("메시지 구독 오류:", error));
-    return () => unsubscribe();
-  }, [roomId, notificationPermission, roomInfo, currentUser, messages.length]);
+  if (!roomId) return;
+  const q = query(collection(db, "chatRooms", roomId, "messages"), orderBy("createdAt"));
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const newMessages = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+    // ⭐ files가 undefined인 메시지는 files: []로 보정
+    const safeMessages = newMessages.map(msg => ({
+      ...msg,
+      files: Array.isArray(msg.files) ? msg.files : [],
+    }));
+    console.log("Firestore에서 받아온 새 메시지들(safe):", safeMessages); // 디버깅용
+    setMessages(safeMessages);
+  }, (error) => console.error("메시지 구독 오류:", error));
+  return () => unsubscribe();
+}, [roomId, notificationPermission, roomInfo, currentUser]);
 
   useEffect(() => {
     if (!roomId) return;
@@ -149,10 +240,6 @@ const ChatRoomPage = ({ userInfo }) => {
           return;
         }
         const data = roomSnap.data();
-        const isParticipant = data.participants?.includes(currentUser.uid);
-        const isCreator = data.createdBy === currentUser.uid;
-        if (!isParticipant && !isCreator) { 
-        }
         setRoomInfo(data);
         await updateDoc(roomRef, {
           [`lastRead.${currentUser.uid}`]: new Date()
@@ -190,7 +277,6 @@ const ChatRoomPage = ({ userInfo }) => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Helper Functions
   const closeModal = (setFunction) => {
     setFunction(false);
     if (window.history.state?.modal === 'open') {
@@ -206,21 +292,24 @@ const ChatRoomPage = ({ userInfo }) => {
     setNewMessage(prev => prev + emoji.native);
   };
 
-  // 메시지 전송 (400 오류 방지: 필수값 체크)
-  const handleSendMessage = async (e) => {
+const handleSendMessage = async (e) => {
   e.preventDefault();
-  if (!newMessage.trim() || !currentUser?.uid || !userInfo?.nickname) {
-    alert("메시지 내용 또는 사용자 정보가 올바르지 않습니다.");
+  if ((!newMessage.trim() && files.length === 0) || uploading) {
+    alert("메시지나 파일/이미지를 입력하세요.");
     return;
   }
   try {
-    await addDoc(collection(db, "chatRooms", roomId, "messages"), {
-      text: newMessage,
+    const messageData = {
+      text: newMessage || "",
+      files,
       createdAt: serverTimestamp(),
       uid: currentUser.uid,
       userName: userInfo.nickname
-    });
+    };
+    const docRef = await addDoc(collection(db, "chatRooms", roomId, "messages"), messageData);
+    console.log("저장된 메시지 데이터:", { id: docRef.id, ...messageData });
     setNewMessage('');
+    setFiles([]);
   } catch (err) {
     alert("채팅 메시지 전송 중 오류가 발생했습니다.");
     console.error("채팅 오류:", err);
@@ -236,7 +325,6 @@ const ChatRoomPage = ({ userInfo }) => {
     } catch (error) { console.error("사용자 정보 오류:", error); }
   };
 
-  // ✅ 강퇴 기능: 방장/운영자만 사용 가능
   const handleBanUser = async (banUid, banName) => {
     if (roomInfo.createdBy !== currentUser.uid) {
       alert("강퇴 권한이 없습니다. 방장만 강퇴할 수 있습니다.");
@@ -263,7 +351,6 @@ const ChatRoomPage = ({ userInfo }) => {
     }
   };
 
-  // ✅ 강퇴된 유저는 즉시 퇴장
   useEffect(() => {
     if (roomInfo?.bannedUsers && roomInfo.bannedUsers[currentUser.uid]) {
       alert("운영자에 의해 강퇴되었습니다.");
@@ -289,44 +376,115 @@ const ChatRoomPage = ({ userInfo }) => {
     } catch (error) { console.error("채팅방 나가기 오류:", error); alert("채팅방 나가기 중 오류가 발생했습니다."); }
   };
 
+  // 추가: 채팅방 삭제 함수
+  const handleDeleteRoom = async () => {
+    if (!roomInfo || roomInfo.createdBy !== currentUser.uid) {
+      alert("채팅방 삭제 권한이 없습니다");
+      return;
+    }
+    if (window.confirm(`'${roomInfo.roomName}' 채팅방을 정말 삭제하시겠습니까?`)) {
+      try {
+        await deleteDoc(doc(db, "chatRooms", roomId));
+        alert("채팅방이 삭제되었습니다");
+        navigate("/chat");
+      } catch (error) {
+        console.error("채팅방 삭제 오류:", error);
+        alert("채팅방 삭제 중 오류가 발생했습니다");
+      }
+    }
+  };
+
   const handleAddNotice = async () => {
     if (!newNotice.title.trim() || !newNotice.content.trim()) return alert("공지 제목과 내용을 입력해주세요.");
     try {
-      await addDoc(collection(db, "chatRooms", roomId, "announcements"), { ...newNotice, createdAt: serverTimestamp(), createdBy: currentUser.uid, createdByName: userInfo.nickname });
+      const noticeDoc = await addDoc(
+        collection(db, "chatRooms", roomId, "announcements"),
+        {
+          ...newNotice,
+          files: noticeFiles,
+          createdAt: serverTimestamp(),
+          createdBy: currentUser.uid,
+          createdByName: userInfo.nickname
+        }
+      );
+      await addDoc(collection(db, "chatRooms", roomId, "messages"), {
+        type: "notice",
+        content: `[공지] ${newNotice.title}`,
+        notice: {
+          id: noticeDoc.id,
+          title: newNotice.title,
+          content: newNotice.content,
+          createdBy: currentUser.uid,
+          createdByName: userInfo.nickname
+        },
+        createdAt: serverTimestamp(),
+        senderId: "system"
+      });
       setNewNotice({ title: '', content: '' });
       alert("공지 등록이 완료되었습니다.");
-    } catch (error) { console.error("공지 등록 오류:", error); alert("공지 등록 중 오류가 발생했습니다."); }
+    } catch (error) {
+      console.error("공지 등록 오류:", error);
+      alert("공지 등록 중 오류가 발생했습니다.");
+    }
   };
 
-  const handleSearchUsers = async () => {
-    if (!searchQuery.trim()) return;
-    const q = query(collection(db, "users"), where("nickname", ">=", searchQuery), where("nickname", "<=", searchQuery + '\uf8ff'));
-    const snapshot = await getDocs(q);
-    setSearchResults(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() })).filter(user => user.uid !== currentUser.uid));
-  };
-
-  const handleInviteUser = async (uid, nickname) => {
-    if (!roomInfo || !roomId) return;
-    const invitationRef = doc(db, "chatRooms", roomId, "invitations", uid);
+  const handleDeleteNotice = async (noticeId, messageId) => {
+    if (!window.confirm("정말로 이 공지를 삭제하시겠습니까?")) return;
     try {
-      await setDoc(invitationRef, { uid, nickname, invitedBy: currentUser.uid, invitedByName: userInfo.nickname, createdAt: serverTimestamp() });
-      alert(`${nickname}님에게 초대장을 보냈습니다.`);
-    } catch (error) { console.error("초대 오류:", error); alert("초대 중 오류가 발생했습니다."); }
+      await deleteDoc(doc(db, "chatRooms", roomId, "announcements", noticeId));
+      if (messageId) {
+        await deleteDoc(doc(db, "chatRooms", roomId, "messages", messageId));
+      }
+      alert("공지 삭제가 완료되었습니다.");
+    } catch (error) {
+      console.error("공지 삭제 오류:", error);
+      alert("공지 삭제 중 오류가 발생했습니다.");
+    }
   };
 
   const handleCreatePoll = async () => {
     const trimmedOptions = newPoll.options.map(opt => opt.trim()).filter(Boolean);
     if (!newPoll.title.trim() || trimmedOptions.length < 2) return alert("투표 제목과 최소 2개의 항목을 입력해주세요.");
     try {
-      await addDoc(collection(db, "chatRooms", roomId, "polls"), {
+      const pollDoc = await addDoc(collection(db, "chatRooms", roomId, "polls"), {
         title: newPoll.title, options: trimmedOptions, deadline: newPoll.deadline ? Timestamp.fromDate(new Date(newPoll.deadline)) : null,
         allowMultiple: newPoll.allowMultiple, isSecret: newPoll.isSecret, isAnonymous: newPoll.isAnonymous,
         votes: {}, createdAt: serverTimestamp(), createdBy: currentUser.uid, createdByName: userInfo.nickname
       });
+      await addDoc(collection(db, "chatRooms", roomId, "messages"), {
+        type: "poll",
+        content: `[투표] ${newPoll.title}`,
+        poll: {
+          id: pollDoc.id,
+          title: newPoll.title,
+          options: trimmedOptions,
+          deadline: newPoll.deadline,
+          createdBy: currentUser.uid,
+          createdByName: userInfo.nickname
+        },
+        createdAt: serverTimestamp(),
+        senderId: "system"
+      });
       setNewPoll({ title: '', options: ['', ''], deadline: '', allowMultiple: false, isSecret: false, isAnonymous: false });
       setCreatingPoll(false);
       alert("투표가 등록되었습니다!");
-    } catch (error) { console.error("투표 생성 오류:", error); alert("투표 등록 중 오류가 발생했습니다."); }
+    } catch (error) {
+      console.error("투표 생성 오류:", error);
+      alert("투표 등록 중 오류가 발생했습니다.");
+    }
+  };
+
+  const handleDeletePoll = async (pollId, pollMessageId) => {
+    try {
+      await deleteDoc(doc(db, "chatRooms", roomId, "polls", pollId));
+      if (pollMessageId) {
+        await deleteDoc(doc(db, "chatRooms", roomId, "messages", pollMessageId));
+      }
+      alert("투표가 삭제되었습니다.");
+    } catch (error) {
+      alert("투표 삭제 중 오류가 발생했습니다.");
+      console.error(error);
+    }
   };
 
   const handleVote = async (poll, option) => {
@@ -338,65 +496,43 @@ const ChatRoomPage = ({ userInfo }) => {
     } else {
       newVotes = myVotes.includes(option) ? [] : [option];
     }
-    await updateDoc(pollRef, { [`votes.${currentUser.uid}`]: newVotes }).catch(error => { console.error("투표하기 오류: ", error); alert("투표 중 오류가 발생했습니다."); });
+    await updateDoc(pollRef, { [`votes.${currentUser.uid}`]: newVotes }).catch(error => {
+      console.error("투표하기 오류: ", error);
+      alert("투표 중 오류가 발생했습니다.");
+    });
     alert("투표가 반영되었습니다.");
   };
 
-  const handleDeleteRoom = async () => {
-    if (!roomInfo || roomInfo.createdBy !== currentUser.uid) return alert("채팅방을 삭제할 권한이 없습니다.");
-    if (window.confirm(`'${roomInfo.roomName}' 채팅방을 정말로 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
-      try {
-        await deleteDoc(doc(db, "chatRooms", roomId));
-        alert("채팅방이 삭제되었습니다.");
-        navigate("/chat");
-      } catch (error) { console.error("채팅방 삭제 오류: ", error); alert("채팅방 삭제 중 오류가 발생했습니다."); }
-    }
+  const handleSearchUsers = async () => {
+    if (!searchQuery.trim()) return;
+    const q = query(collection(db, "users"),
+      where("nickname", ">=", searchQuery),
+      where("nickname", "<=", searchQuery + '\uf8ff'));
+    const snapshot = await getDocs(q);
+    setSearchResults(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }))
+      .filter(user => user.uid !== currentUser.uid));
   };
 
-  // 비밀번호 입력 후 자동 참여하는 함수
-  const handleJoinRoom = async () => {
-    if (!roomInfo || !currentUser || !userInfo) return;
-    setIsJoining(true);
+  const handleInviteUser = async (uid, nickname) => {
+    if (!roomInfo || !roomId) return;
+    const invitationRef = doc(db, "chatRooms", roomId, "invitations", uid);
     try {
-      await updateDoc(doc(db, "chatRooms", roomId), {
-        participants: [...roomInfo.participants, currentUser.uid],
-        participantNames: [...(roomInfo.participantNames || []), userInfo.name || userInfo.nickname],
-        participantNicknames: [...(roomInfo.participantNicknames || []), userInfo.nickname],
+      await setDoc(invitationRef, {
+        uid,
+        nickname,
+        invitedBy: currentUser.uid,
+        invitedByName: userInfo.nickname,
+        createdAt: serverTimestamp()
       });
+      alert(`${nickname}님에게 초대장을 보냈습니다.`);
     } catch (error) {
-      console.error("채팅방 참여 오류: ", error);
-      alert("채팅방 참여에 실패했습니다.");
-      setIsJoining(false);
+      console.error("초대 오류:", error);
+      alert("초대 중 오류가 발생했습니다.");
     }
   };
 
-  // --- Render Logic ---
-  if (loading || !userInfo) {
-    return <div className="loading-screen">채팅방 정보를 불러오는 중...</div>;
-  }
-  
-  if(isJoining) {
-    return <div className="loading-screen">채팅방에 참여하는 중...</div>;
-  }
-
-  // 참여자가 아닌 경우, 입장 조건 확인 로직
-  if (!roomInfo || !roomInfo.participants?.includes(currentUser.uid)) {
-  // 여기가 입장 조건 확인 로직입니다.
-  const handleEntryCheck = () => {
-    if (!roomInfo) return <BlockedScreen message="존재하지 않는 채팅방입니다." />;
-    // 1. 인원 제한 체크 추가 (가장 먼저!)
-    if (roomInfo.maxParticipants && roomInfo.participants.length >= roomInfo.maxParticipants) {
-      return <BlockedScreen message="채팅방 정원이 가득 찼습니다." />;
-    }
-    // 2. 초대 후 입장 등 기타 조건
-    if (!roomInfo.participants.includes(currentUser.uid)) {
-      return <BlockedScreen message="초대 후 입장할 수 있는 채팅방입니다." />;
-    }
-    return <BlockedScreen message="아직 이 채팅방에 참여하지 않았습니다." />;
-  };
-  return handleEntryCheck();
-}
-
+  // 메시지 그룹화 변수 정의 (오류 해결)
+  const groupedMessages = groupMessagesByDate(filteredMessages);
   const chatTitle = roomInfo?.isGroupChat ? roomInfo?.roomName || '그룹 채팅방' : roomInfo?.participantNicknames?.find(nick => nick !== userInfo?.nickname) || '1:1 대화';
 
   return (
@@ -452,163 +588,377 @@ const ChatRoomPage = ({ userInfo }) => {
 
       {/* --- 참여자 목록: 카카오톡처럼 하단 모달/슬라이드로 오버레이 --- */}
       <Modal
-  isOpen={showParticipants}
-  onRequestClose={() => setShowParticipants(false)}
-  shouldCloseOnOverlayClick={true}
-  shouldCloseOnEsc={true}
-  aria={{ labelledby: "participantsTitle" }}
-  contentLabel="참여자 목록"
-  style={{
-    overlay: {
-      backgroundColor: 'rgba(0,0,0,0.15)',
-      zIndex: 1100
-    },
-    content: {
-      top: '70px',
-      right: '0px',
-      left: 'auto',
-      bottom: 'auto',
-      width: '320px',
-      height: 'calc(100vh - 90px)',
-      borderRadius: '16px 0 0 16px',
-      padding: '24px 18px 18px 18px',
-      boxShadow: '0 2px 16px rgba(0,0,0,0.12)',
-      overflow: 'auto',
-      margin: 0,
-      position: 'fixed',
-      background: '#fff',
-      zIndex: 1200
-    }
-  }}
->
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-    <strong id="participantsTitle" style={{ fontSize: '16px' }}>참여자 목록</strong>
-    <button
-      onClick={() => setShowParticipants(false)}
-      style={{
-        fontSize: '20px',
-        background: 'none',
-        border: 'none',
-        color: '#000',
-        cursor: 'pointer',
-        zIndex: 1300
-      }}
-      aria-label="참여자 목록 닫기"
-      title="참여자 목록 닫기"
-      tabIndex={0}
-    >
-      ×
-    </button>
-  </div>
-  <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>
-    채팅방에 함께 참여 중인 사람들입니다.
-  </div>
-  <div style={{ fontSize: '12px', color: '#666' }}>
-  {roomInfo.participants.length} / {roomInfo.maxParticipants || '무제한'}명 참여중
-</div>
-  <div style={{ maxHeight: '70vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-    {roomInfo?.participantNames?.map((name, idx) => (
-      <span key={idx} style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        background: '#fffbe6',
-        borderRadius: '20px',
-        padding: '6px 12px',
-        fontSize: '15px',
-        fontWeight: 500
-      }}>
-        <span style={{
-          background: '#ffeb3b',
-          borderRadius: '50%',
-          width: '26px',
-          height: '26px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontWeight: 'bold',
-          fontSize: '14px'
-        }}>
-          {name.slice(0, 2)}
-        </span>
-        <span style={{ wordBreak: 'break-all' }}>{name} ({roomInfo.participantNicknames?.[idx] || '닉네임 없음'})</span>
-        {roomInfo.createdBy === currentUser.uid && roomInfo.participants[idx] !== currentUser.uid && (
+        isOpen={showParticipants}
+        onRequestClose={() => setShowParticipants(false)}
+        shouldCloseOnOverlayClick={true}
+        shouldCloseOnEsc={true}
+        aria={{ labelledby: "participantsTitle" }}
+        contentLabel="참여자 목록"
+        style={{
+          overlay: {
+            backgroundColor: 'rgba(0,0,0,0.15)',
+            zIndex: 1100
+          },
+          content: {
+            top: '70px',
+            right: '0px',
+            left: 'auto',
+            bottom: 'auto',
+            width: '320px',
+            height: 'calc(100vh - 90px)',
+            borderRadius: '16px 0 0 16px',
+            padding: '24px 18px 18px 18px',
+            boxShadow: '0 2px 16px rgba(0,0,0,0.12)',
+            overflow: 'auto',
+            margin: 0,
+            position: 'fixed',
+            background: '#fff',
+            zIndex: 1200
+          }
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <strong id="participantsTitle" style={{ fontSize: '16px' }}>참여자 목록</strong>
           <button
+            onClick={() => setShowParticipants(false)}
             style={{
-              marginLeft: '6px',
-              color: '#fff',
-              background: '#dc3545',
+              fontSize: '20px',
+              background: 'none',
               border: 'none',
-              borderRadius: '12px',
-              padding: '2px 10px',
-              fontSize: '13px',
-              cursor: 'pointer'
+              color: '#000',
+              cursor: 'pointer',
+              zIndex: 1300
             }}
-            onClick={() => handleBanUser(roomInfo.participants[idx], name)}
-            aria-label={`${name} 강퇴`}
-            type="button"
-          >강퇴</button>
-        )}
-      </span>
-    ))}
-  </div>
-</Modal>
-
-{/* 검색창 추가 위치 */}
-<div style={{ margin: '12px 0' }}>
-  <input
-    type="text"
-    value={searchTerm}
-    onChange={(e) => setSearchTerm(e.target.value)}
-    placeholder="채팅 내용 검색..."
-    aria-label="채팅 검색창"
-    style={{
-      width: '100%',
-      padding: '8px',
-      fontSize: '1rem',
-      border: '1px solid #ccc',
-      borderRadius: '6px'
-    }}
-  />
+            aria-label="참여자 목록 닫기"
+            title="참여자 목록 닫기"
+            tabIndex={0}
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>
+          채팅방에 함께 참여 중인 사람들입니다.
+        </div>
+        <div style={{ fontSize: '12px', color: '#666' }}>
+  {roomInfo && roomInfo.participants
+    ? `${roomInfo.participants.length} / ${roomInfo.maxParticipants || '무제한'}명 참여중`
+    : '로딩 중...'}
 </div>
+        <div style={{ maxHeight: '70vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {roomInfo && roomInfo.participantNames && roomInfo.participantNames.map((name, idx) => (
+            <span key={idx} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#fffbe6',
+              borderRadius: '20px',
+              padding: '6px 12px',
+              fontSize: '15px',
+              fontWeight: 500
+            }}>
+              <span style={{
+                background: '#ffeb3b',
+                borderRadius: '50%',
+                width: '26px',
+                height: '26px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                fontSize: '14px'
+              }}>
+                {name.slice(0, 2)}
+              </span>
+              <span style={{ wordBreak: 'break-all' }}>{name} ({roomInfo.participantNicknames?.[idx] || '닉네임 없음'})</span>
+              {roomInfo.createdBy === currentUser.uid && roomInfo.participants[idx] !== currentUser.uid && (
+                <button
+                  style={{
+                    marginLeft: '6px',
+                    color: '#fff',
+                    background: '#dc3545',
+                    border: 'none',
+                    borderRadius: '12px',
+                    padding: '2px 10px',
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => handleBanUser(roomInfo.participants[idx], name)}
+                  aria-label={`${name} 강퇴`}
+                  type="button"
+                >강퇴</button>
+              )}
+            </span>
+          ))}
+        </div>
+      </Modal>
 
-{/* 기존: 메시지 리스트 출력 */}
-{filteredMessages.map(msg => (
-  <div key={msg.id} className="message">
-    {/* 메시지 내용 출력 */}
-  </div>
-))}
+      <div style={{ margin: '12px 0' }}>
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="채팅 내용 검색..."
+          aria-label="채팅 검색창"
+          style={{
+            width: '100%',
+            padding: '8px',
+            fontSize: '1rem',
+            border: '1px solid #ccc',
+            borderRadius: '6px'
+          }}
+        />
+      </div>
 
       {/* --- 채팅 메시지 --- */}
-   <div className="chat-box">
-  {filteredMessages.length === 0 ? (
-    <div className="no-results" style={{ color: "#888", textAlign: "center", margin: "20px 0" }}>
-      검색 결과가 없습니다.
-    </div>
-  ) : (
-    filteredMessages.map(msg => (
-      <div key={msg.id} className={`message-wrapper ${msg.uid === currentUser?.uid ? 'sent' : 'received'}`}>
-        {msg.uid !== currentUser?.uid && <div className="message-sender">{msg.userName}</div>}
-        <div className="message-bubble">
-          <div className="message-text">
-            {getHighlightedText(msg.text, searchTerm)}
+<div className="chat-box" style={{ padding: '12px', overflowY: 'auto', maxHeight: '70vh' }}>
+  {Object.entries(groupedMessages).map(([date, msgs]) => (
+    <div key={date}>
+      <div className="chat-date-divider">{date}</div>
+      {msgs.map((msg, index) => {
+        const isMine = msg.uid === currentUser?.uid;
+        const prevMsg = index > 0 ? msgs[index - 1] : null;
+        const showTime = !prevMsg || prevMsg.createdAt?.toDate().toLocaleDateString() !== msg.createdAt?.toDate().toLocaleDateString() || prevMsg.uid !== msg.uid;
+        const timeStr = msg.createdAt?.toDate
+          ? msg.createdAt.toDate().toLocaleTimeString('ko-KR', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+            }).replace('오전', '오전 ').replace('오후', '오후 ')
+          : '시간 없음';
+        return (
+          <div key={msg.id} className={`message-wrapper ${isMine ? 'sent' : 'received'}`}>
+            {msg.uid !== currentUser?.uid && <div className="message-sender">{msg.userName}</div>}
+            <div className="message-bubble"
+              style={{
+                padding: '12px 16px',
+                borderRadius: 14,
+                background: '#f7f7f7',
+                display: 'block',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                justifyContent: 'flex-start',
+                marginBottom: 8,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+              }}>
+              {(msg.text && msg.text.trim()) && (
+                <div className="message-text" style={{ marginBottom: Array.isArray(msg.files) && msg.files.length > 0 ? 8 : 0 }}>
+                  {getHighlightedText(msg.text, searchTerm)}
+                </div>
+              )}
+              {Array.isArray(msg.files) && msg.files.length > 0 && (
+                <div style={{ marginTop: (msg.text && msg.text.trim()) ? 8 : 2 }}>
+                  <ul style={{ display: 'flex', gap: 8, listStyle: 'none', padding: 0, margin: 0 }}>
+                    {msg.files.map((file, idx) => (
+                      <li key={idx}>
+                        {file.type && file.type.startsWith('image/') ? (
+                          <img
+                            src={file.url}
+                            alt={file.originalName}
+                            style={{
+                              maxWidth: '100px',
+                              maxHeight: '100px',
+                              objectFit: 'contain',
+                              borderRadius: 4,
+                              marginRight: 4,
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => handleImageClick(file.url)}
+                          />
+                        ) : (
+                          <a
+                            href={file.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              color: '#1976d2',
+                              textDecoration: 'underline',
+                              fontWeight: 'bold',
+                              fontSize: 18,
+                              wordBreak: 'break-all',
+                              display: 'inline-block',
+                              padding: '14px 18px',
+                              background: '#fffbe6',
+                              borderRadius: 10,
+                              margin: '12px 0',
+                              border: '2px solid #1976d2',
+                              boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+                            }}
+                          >
+                            📄 {file.originalName}
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {(!msg.text || !msg.text.trim()) && (!Array.isArray(msg.files) || msg.files.length === 0) && (
+                <div style={{ color: '#aaa', fontSize: 13 }}>삭제된 메시지입니다.</div>
+              )}
+              {msg.uid === currentUser?.uid && (
+                <button
+                  style={{
+                    marginTop: 8,
+                    background: '#dc3545',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '4px 10px',
+                    cursor: 'pointer',
+                    fontSize: 13
+                  }}
+                  onClick={async () => {
+                    if (window.confirm("정말 삭제하시겠습니까?")) {
+                      try {
+                        await deleteDoc(doc(db, "chatRooms", roomId, "messages", msg.id));
+                        alert("메시지가 삭제되었습니다.");
+                      } catch (err) {
+                        alert("삭제 중 오류가 발생했습니다.");
+                        console.error(err);
+                      }
+                    }
+                  }}
+                >
+                  삭제
+                </button>
+              )}
+              {showTime && (
+                <div style={{ fontSize: '12px', color: '#888', textAlign: isMine ? 'right' : 'left', marginTop: 4 }}>
+                  {timeStr}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
-    ))
-  )}
+        );
+      })}
+    </div>
+  ))}
   <div ref={messagesEndRef} />
 </div>
 
-      {/* --- 메시지 입력창 --- */}
-      <div className="chat-input-container">
-        {showEmojiPicker && <div className="emoji-picker-wrapper"><Picker onSelect={handleEmojiSelect} /></div>}
-        <form onSubmit={handleSendMessage} className="message-form">
-          <button type="button" className="emoji-button" onClick={() => setShowEmojiPicker(p => !p)} aria-label="이모지 선택">😀</button>
-          <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="메시지를 입력하세요... (예: 안녕하세요!)" aria-label="메시지 입력" />
-          <button type="submit" aria-label="메시지 전송">전송</button>
-        </form>
+      {/* 이미지 모달 (기존 코드 유지) */}
+      <Modal
+        isOpen={showImageModal}
+        onRequestClose={() => setShowImageModal(false)}
+        style={{
+          overlay: {
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            zIndex: 2000,
+          },
+          content: {
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '90%', // 모바일에서 90%로 유연하게
+    maxWidth: '500px', // 데스크톱 최대값 유지
+    maxHeight: '90vh',
+    padding: '0',
+    border: 'none',
+    background: 'transparent',
+    overflow: 'auto', // 스크롤 가능하게
+  },
+}}
+      >
+        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+          <img
+  src={selectedImageUrl}
+  alt="Enlarged view"
+  style={{
+    width: '100%',
+    height: 'auto',
+    maxHeight: '90vh', // 약간 더 넓게 설정
+    objectFit: 'contain',
+    display: 'block', // 중앙 정렬을 위한 설정
+    margin: '0 auto', // 중앙 정렬
+  }}
+/>
+          <button
+            onClick={() => setShowImageModal(false)}
+            style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              background: '#dc3545',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '50%',
+              width: '30px',
+              height: '30px',
+              fontSize: '18px',
+              cursor: 'pointer',
+            }}
+          >
+            ×
+          </button>
+        </div>
+      </Modal>
+
+{/* --- 메시지 입력창 --- */}
+<div className="chat-input-container">
+  <form onSubmit={handleSendMessage} className="message-form" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+    <label htmlFor="chat-file-upload" style={{ cursor: 'pointer', marginRight: 8, fontSize: 20, display: 'flex', alignItems: 'center', gap: 4 }}>
+      <span role="img" aria-label="파일">📎</span>
+      <span style={{ fontSize: 14, color: '#555' }}>파일 첨부</span>
+      <input
+        id="chat-file-upload"
+        type="file"
+        multiple
+        accept="image/*,application/pdf"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
+    </label>
+    <input
+      type="text"
+      value={newMessage}
+      onChange={e => setNewMessage(e.target.value)}
+      placeholder="메시지를 입력하세요... (예: 안녕하세요!)"
+      aria-label="메시지 입력"
+      style={{ flex: 1, padding: 8, borderRadius: 6, border: '1px solid #ccc' }}
+    />
+    <button
+  type="submit"
+  aria-label="메시지 전송"
+  disabled={uploading || (!newMessage.trim() && files.length === 0)}
+  style={{
+    background: '#0d6efd',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 6,
+    padding: '6px 16px',
+    fontWeight: 600,
+    opacity: (uploading || (!newMessage.trim() && files.length === 0)) ? 0.5 : 1,
+    cursor: (uploading || (!newMessage.trim() && files.length === 0)) ? 'not-allowed' : 'pointer'
+  }}
+>
+  전송
+</button>
+  </form>
+  {/* 업로드 중/에러 표시 */}
+  {uploading && (
+    <div style={{ color: "#1976d2", fontSize: 14, marginTop: 4 }}>파일 업로드 중...</div>
+  )}
+  {uploadError && (
+    <div style={{ color: "red", fontSize: 14, marginTop: 4 }}>{uploadError}</div>
+  )}
+  {/* 파일 미리보기/파일명 */}
+  {files.length > 0 && (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+      {files.map((file, idx) =>
+        file.type.startsWith('image/') ? (
+          <img key={idx} src={file.url} alt={file.originalName} style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 4 }} />
+        ) : (
+          <span key={idx} style={{ fontSize: 13, background: '#eee', borderRadius: 4, padding: '2px 6px' }}>{file.originalName}</span>
+        )
+      )}
+        <button type="button" onClick={() => setFiles([])} style={{ marginLeft: 4, color: 'red', border: 'none', background: 'transparent', cursor: 'pointer' }}>x</button>
+        <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>첨부파일은 10MB 이하, 최대 3개까지 가능합니다.</span>
       </div>
+    )}
+    <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+      이미지는 jpg, png, gif, pdf만 첨부 가능 (최대 3개, 10MB 이하)
+    </div>
+  </div>
 
       {/* --- 사용자 정보 Modal --- */}
       <Modal isOpen={!!selectedUser} onRequestClose={() => closeModal(() => setSelectedUser(null))} style={{ overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 }, content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '300px', padding: '20px', borderRadius: '10px' } }}>
@@ -620,26 +970,239 @@ const ChatRoomPage = ({ userInfo }) => {
       </Modal>
       
       {/* --- 공지 Modal --- */}
-      <Modal isOpen={showNoticeModal} onRequestClose={() => closeModal(setShowNoticeModal)} style={{ overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 }, content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '400px', padding: '20px', borderRadius: '10px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' } }}>
-        <h3 style={{marginTop: 0, flexShrink: 0}}>📢 공지사항</h3>
-        <div style={{flexGrow: 1, overflowY: 'auto' }}>
-          <ul style={{ paddingLeft: 0, listStyle: 'none', margin: 0 }}>
-            {noticeList.map((notice) => (
-              <li key={notice.id} style={{ marginBottom: '10px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-                <strong>{notice.title}</strong><br />
-                <span style={{ whiteSpace: 'pre-wrap' }}>{notice.content}</span><br />
-                <small style={{ color: '#555' }}>작성자: {notice.createdByName}</small>
-              </li>
-            ))}
-          </ul>
-          <hr />
-          <h4>새 공지 등록</h4>
-          <input type="text" placeholder="제목 (예: 6월 모임 안내)" value={newNotice.title} onChange={(e) => setNewNotice(p => ({ ...p, title: e.target.value }))} style={{ width: '100%', marginBottom: '8px', padding: '8px', boxSizing: 'border-box' }} aria-label="공지 제목 입력" />
-          <textarea placeholder="내용 (예: 6월 모임은 6/25 15시에 진행됩니다.)" value={newNotice.content} onChange={(e) => setNewNotice(p => ({ ...p, content: e.target.value }))} rows={3} style={{ width: '100%', marginBottom: '8px', padding: '8px', boxSizing: 'border-box' }} aria-label="공지 내용 입력" />
-          <button onClick={handleAddNotice} style={{ background: '#0d6efd', color: '#fff', padding: '8px 12px', border: 'none', cursor: 'pointer', borderRadius: '4px' }}>등록</button>
-        </div>
-        <button onClick={() => closeModal(setShowNoticeModal)} style={{ marginTop: '15px', background: '#6c757d', color: '#fff', padding: '8px 12px', cursor: 'pointer', border: 'none', borderRadius: '4px', alignSelf: 'flex-end', flexShrink: 0 }}>닫기</button>
-      </Modal>
+<Modal
+  isOpen={showNoticeModal}
+  onRequestClose={() => closeModal(setShowNoticeModal)}
+  style={{
+    overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 },
+    content: {
+      top: '50%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      width: '90%',
+      maxWidth: '400px',
+      padding: '20px',
+      borderRadius: '10px',
+      maxHeight: '90vh',
+      display: 'flex',
+      flexDirection: 'column'
+    }
+  }}
+>
+  <h3 style={{ marginTop: 0, flexShrink: 0 }}>📢 공지사항</h3>
+  <div style={{ flexGrow: 1, overflowY: 'auto' }}>
+    {/* --- 공지 리스트 --- */}
+    <ul style={{ paddingLeft: 0, listStyle: 'none', margin: 0 }}>
+      {noticeList.map((notice) => (
+        <li
+          key={notice.id}
+          style={{
+            marginBottom: '10px',
+            borderBottom: '1px solid #eee',
+            paddingBottom: '10px'
+          }}
+        >
+          <strong>{notice.title}</strong>
+          <br />
+          <span style={{ whiteSpace: 'pre-wrap' }}>{notice.content}</span>
+          <br />
+          {/* 파일/이미지 미리보기 */}
+          {Array.isArray(notice.files) && notice.files.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <ul style={{ display: 'flex', gap: 6, listStyle: 'none', padding: 0 }}>
+                {notice.files.map((file, idx) => (
+                  <li key={idx}>
+                    {file.type && file.type.startsWith('image/') ? (
+                      <img
+                        src={file.url}
+                        alt={file.originalName}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          objectFit: 'cover',
+                          borderRadius: 4,
+                          marginRight: 4
+                        }}
+                      />
+                    ) : (
+                      <a
+                        href={file.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: '#1976d2', textDecoration: 'underline' }}
+                      >
+                        {file.originalName}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <small style={{ color: '#555' }}>작성자: {notice.createdByName}</small>
+          {/* (공지 삭제 버튼 등 추가 가능) */}
+          {notice.createdBy === currentUser.uid && (
+            <button
+              style={{
+                marginTop: 6,
+                background: '#dc3545',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '6px 12px',
+                cursor: 'pointer'
+              }}
+              onClick={() => handleDeleteNotice(notice.id, messages.find(m => m.type === "notice" && m.notice?.id === notice.id)?.id)}
+            >
+              공지 삭제
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
+    <hr />
+    {/* --- 새 공지 등록 폼 --- */}
+    <h4>새 공지 등록</h4>
+    <input
+      type="text"
+      placeholder="제목 (예: 6월 모임 안내)"
+      value={newNotice.title}
+      onChange={e => setNewNotice(p => ({ ...p, title: e.target.value }))}
+      style={{
+        width: '100%',
+        marginBottom: '8px',
+        padding: '8px',
+        boxSizing: 'border-box'
+      }}
+      aria-label="공지 제목 입력"
+    />
+    <textarea
+      placeholder="내용 (예: 6월 모임은 6/25 15시에 진행됩니다.)"
+      value={newNotice.content}
+      onChange={e => setNewNotice(p => ({ ...p, content: e.target.value }))}
+      rows={3}
+      style={{
+        width: '100%',
+        marginBottom: '8px',
+        padding: '8px',
+        boxSizing: 'border-box'
+      }}
+      aria-label="공지 내용 입력"
+    />
+    {/* 파일 첨부 UI */}
+    <label
+      htmlFor="notice-file-upload"
+      style={{
+        cursor: 'pointer',
+        marginRight: 8,
+        fontSize: 20,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4
+      }}
+    >
+      <span role="img" aria-label="파일">📎</span>
+      <span style={{ fontSize: 14, color: '#555' }}>파일 첨부</span>
+      <input
+        id="notice-file-upload"
+        type="file"
+        multiple
+        accept="image/*,application/pdf"
+        style={{ display: 'none' }}
+        onChange={handleNoticeFileChange}
+      />
+    </label>
+    {noticeUploading && (
+      <div style={{ color: "#1976d2", fontSize: 14, marginTop: 4 }}>
+        파일 업로드 중...
+      </div>
+    )}
+    {noticeUploadError && (
+      <div style={{ color: "red", fontSize: 14, marginTop: 4 }}>
+        {noticeUploadError}
+      </div>
+    )}
+    {noticeFiles.length > 0 && (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+        {noticeFiles.map((file, idx) =>
+          file.type.startsWith('image/') ? (
+            <img
+              key={idx}
+              src={file.url}
+              alt={file.originalName}
+              style={{
+                width: 32,
+                height: 32,
+                objectFit: 'cover',
+                borderRadius: 4
+              }}
+            />
+          ) : (
+            <span
+              key={idx}
+              style={{
+                fontSize: 13,
+                background: '#eee',
+                borderRadius: 4,
+                padding: '2px 6px'
+              }}
+            >
+              {file.originalName}
+            </span>
+          )
+        )}
+        <button
+          type="button"
+          onClick={() => setNoticeFiles([])}
+          style={{
+            marginLeft: 4,
+            color: 'red',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer'
+          }}
+        >
+          x
+        </button>
+        <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>
+          첨부파일은 10MB 이하, 최대 3개까지 가능합니다.
+        </span>
+      </div>
+    )}
+    <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+      이미지는 jpg, png, gif, pdf만 첨부 가능 (최대 3개, 10MB 이하)
+    </div>
+    <button
+      onClick={handleAddNotice}
+      style={{
+        background: '#0d6efd',
+        color: '#fff',
+        padding: '8px 12px',
+        border: 'none',
+        cursor: 'pointer',
+        borderRadius: '4px'
+      }}
+    >
+      등록
+    </button>
+  </div>
+  <button
+    onClick={() => closeModal(setShowNoticeModal)}
+    style={{
+      marginTop: '15px',
+      background: '#6c757d',
+      color: '#fff',
+      padding: '8px 12px',
+      cursor: 'pointer',
+      border: 'none',
+      borderRadius: '4px',
+      alignSelf: 'flex-end',
+      flexShrink: 0
+    }}
+  >
+    닫기
+  </button>
+</Modal>
 
       {/* --- 투표 Modal (날짜 항목 추가 포함) --- */}
       <Modal isOpen={showPollModal} onRequestClose={() => closeModal(setShowPollModal)} style={{ overlay: { backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1010 }, content: { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '90%', maxWidth: '500px', padding: '20px', borderRadius: '10px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' } }}>
@@ -694,6 +1257,20 @@ const ChatRoomPage = ({ userInfo }) => {
                   </ul>
                   {!showResult && <p style={{ textAlign: 'center', color: '#888', fontSize: '14px' }}>투표가 마감되면 결과를 볼 수 있습니다.</p>}
                   <small style={{ color: '#555', display: 'block', textAlign: 'right', marginTop: '5px' }}>작성자: {poll.isAnonymous ? '익명' : poll.createdByName}</small>
+                  {/* 투표 삭제 버튼 */}
+                  {poll.createdBy === currentUser.uid && (
+  <button
+    onClick={() => {
+      const pollMsg = messages.find(m => m.type === "poll" && m.poll?.id === poll.id);
+      if (pollMsg) {
+        handleDeletePoll(poll.id, pollMsg.id);
+      } else {
+        alert("채팅 메시지에서 해당 투표 메시지를 찾을 수 없습니다.");
+      }
+    }}>
+    투표 삭제
+  </button>
+)}
                 </li>
               );
             })}

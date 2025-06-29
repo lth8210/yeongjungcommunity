@@ -8,6 +8,7 @@ import { Carousel } from 'react-responsive-carousel';
 import "react-responsive-carousel/lib/styles/carousel.min.css";
 import { db } from '../firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import logo from '../assets/logo.png';
 
 const HomePage = ({ userInfo }) => {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -47,21 +48,58 @@ const HomePage = ({ userInfo }) => {
       setSearchResults({ meetings: [], notices: [], proposals: [], chatRooms: [], users: [] });
       return;
     }
+    const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+    const queryNorm = normalize(searchQuery);
+
     const meetingQ = query(collection(db, "meetings"), orderBy("meetingTime", "desc"));
     const meetingSnap = await getDocs(meetingQ);
-    const meetings = meetingSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(m => (m.title || '').includes(searchQuery));
+    const meetings = meetingSnap.docs.map(doc => {
+      const data = { id: doc.id, ...doc.data() };
+      const titleNorm = normalize(data.title || '');
+      const descNorm = normalize(data.description || '');
+      const score = (titleNorm.includes(queryNorm) ? 2 : 0) + (descNorm.includes(queryNorm) ? 1 : 0);
+      return { ...data, score };
+    }).filter(m => m.score > 0).sort((a, b) => b.score - a.score);
+
     const noticeQ = query(collection(db, "notices"), orderBy("createdAt", "desc"));
     const noticeSnap = await getDocs(noticeQ);
-    const notices = noticeSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(n => (n.title || '').includes(searchQuery));
+    const notices = noticeSnap.docs.map(doc => {
+      const data = { id: doc.id, ...doc.data() };
+      const titleNorm = normalize(data.title || '');
+      const contentNorm = normalize(data.content || '');
+      const score = (titleNorm.includes(queryNorm) ? 2 : 0) + (contentNorm.includes(queryNorm) ? 1 : 0);
+      return { ...data, score };
+    }).filter(n => n.score > 0).sort((a, b) => b.score - a.score);
+
     const proposalQ = query(collection(db, "proposals"), orderBy("createdAt", "desc"));
     const proposalSnap = await getDocs(proposalQ);
-    const proposals = proposalSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(p => (p.title || '').includes(searchQuery));
+    const proposals = proposalSnap.docs.map(doc => {
+      const data = { id: doc.id, ...doc.data() };
+      const titleNorm = normalize(data.title || '');
+      const contentNorm = normalize(data.content || '');
+      const score = (titleNorm.includes(queryNorm) ? 2 : 0) + (contentNorm.includes(queryNorm) ? 1 : 0);
+      return { ...data, score };
+    }).filter(p => p.score > 0).sort((a, b) => b.score - a.score);
+
     const chatQ = query(collection(db, "chatRooms"));
     const chatSnap = await getDocs(chatQ);
-    const chatRooms = chatSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(c => (c.roomName || '').includes(searchQuery));
+    const chatRooms = chatSnap.docs.map(doc => {
+      const data = { id: doc.id, ...doc.data() };
+      const roomNameNorm = normalize(data.roomName || '');
+      const score = roomNameNorm.includes(queryNorm) ? 2 : 0;
+      return { ...data, score };
+    }).filter(c => c.score > 0).sort((a, b) => b.score - a.score);
+
     const userQ = query(collection(db, "users"));
     const userSnap = await getDocs(userQ);
-    const users = userSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(u => (u.nickname || u.name || '').includes(searchQuery));
+    const users = userSnap.docs.map(doc => {
+      const data = { id: doc.id, ...doc.data() };
+      const nicknameNorm = normalize(data.nickname || '');
+      const nameNorm = normalize(data.name || '');
+      const score = (nicknameNorm.includes(queryNorm) ? 2 : 0) + (nameNorm.includes(queryNorm) ? 1 : 0);
+      return { ...data, score };
+    }).filter(u => u.score > 0).sort((a, b) => b.score - a.score);
+
     setSearchResults({ meetings, notices, proposals, chatRooms, users });
   };
 
@@ -80,24 +118,24 @@ const HomePage = ({ userInfo }) => {
   const unreadCount = myChats.reduce((acc, room) => acc + (room.unreadCount || 0), 0);
 
   const handleMessageClick = (user) => {
-  const fixedUser = { ...user, uid: user.uid || user.id };
-  if (!userInfo?.uid || !fixedUser?.uid) {
-    alert("본인 또는 상대방 정보가 올바르지 않습니다.");
-    return;
-  }
-  setTargetUser(fixedUser);
-  setShowMessageModal(true);
-};
+    const fixedUser = { ...user, uid: user.uid || user.id };
+    if (!userInfo?.uid || !fixedUser?.uid) {
+      alert("본인 또는 상대방 정보가 올바르지 않습니다.");
+      return;
+    }
+    setTargetUser(fixedUser);
+    setShowMessageModal(true);
+  };
 
-const handleChatClick = (user) => {
-  const fixedUser = { ...user, uid: user.uid || user.id };
-  if (!userInfo?.uid || !fixedUser?.uid) {
-    alert("본인 또는 상대방 정보가 올바르지 않습니다.");
-    return;
-  }
-  setTargetUser(fixedUser);
-  setShowChatModal(true);
-};
+  const handleChatClick = (user) => {
+    const fixedUser = { ...user, uid: user.uid || user.id };
+    if (!userInfo?.uid || !fixedUser?.uid) {
+      alert("본인 또는 상대방 정보가 올바르지 않습니다.");
+      return;
+    }
+    setTargetUser(fixedUser);
+    setShowChatModal(true);
+  };
 
   const quickCards = [
     {
@@ -190,12 +228,64 @@ const handleChatClick = (user) => {
 
   return (
     <div className="homepage" style={{ maxWidth: 900, margin: "0 auto", padding: "0 16px" }}>
-      <div className="site-title-area" style={{marginBottom: "18px", textAlign: "center"}}>
-        <h1 style={{fontWeight: 700, fontSize: "2rem", margin: 0, color: "#0d6efd"}} aria-label="영중 행복마을" title="영중 행복마을">영중 행복마을</h1>
-        <div className="site-desc" style={{fontSize: "16px", color: "#666", marginTop: "6px"}} aria-label="우리 동네 소통·정보·모임 플랫폼" title="우리 동네 소통·정보·모임 플랫폼">
-          우리 동네 소통·정보·모임 플랫폼
-        </div>
-      </div>
+      <div
+  className="site-title-area"
+  style={{
+    marginBottom: "18px",
+    textAlign: "center",
+    display: "flex",
+    flexDirection: "column",      // 세로로 쌓이게 변경!
+    alignItems: "center",
+    justifyContent: "center"
+  }}
+>
+  <img
+    src={logo}
+    alt="복지관 로고"
+    style={{ height: "44px", marginBottom: "12px" }} // 아래로 간격
+  />
+  <h1
+    style={{
+      fontWeight: 700,
+      fontSize: "2rem",
+      margin: 0,
+      color: "#0d6efd",
+      marginBottom: "6px" // 아래로 간격
+    }}
+    aria-label="영중 행복마을"
+    title="영중 행복마을"
+  >
+    영중 행복마을
+  </h1>
+  <div
+    className="site-desc"
+    style={{
+      fontSize: "16px",
+      color: "#666",
+      marginBottom: "10px"
+    }}
+    aria-label="우리 동네 소통·정보·모임 플랫폼"
+    title="우리 동네 소통·정보·모임 플랫폼"
+  >
+    우리 동네 소통·정보·모임 플랫폼
+  </div>
+  <button
+    onClick={() => window.open('https://www.yeongjung.or.kr/main/main.html', '_blank')}
+    style={{
+      fontSize: "14px",
+      background: "#0d6efd",
+      color: "#fff",
+      border: "none",
+      borderRadius: "6px",
+      padding: "6px 12px",
+      cursor: "pointer"
+    }}
+    aria-label="영중종합사회복지관 홈페이지"
+    title="영중종합사회복지관 홈페이지"
+  >
+    영중종합사회복지관 홈페이지
+  </button>
+</div>
 
       <a href="#main-content" className="skip-link" tabIndex={0}>본문 바로가기</a>
 
@@ -467,23 +557,22 @@ const handleChatClick = (user) => {
       </div>
 
       {showMessageModal && targetUser && userInfo && (
-  <MessageModal
-    open={showMessageModal}
-    onClose={() => setShowMessageModal(false)}
-    fromUser={userInfo}
-    toUser={targetUser}
-  />
-)}
+        <MessageModal
+          open={showMessageModal}
+          onClose={() => setShowMessageModal(false)}
+          fromUser={userInfo}
+          toUser={targetUser}
+        />
+      )}
 
-{showChatModal && targetUser && userInfo && (
-  <ChatModal
-    open={showChatModal}
-    onClose={() => setShowChatModal(false)}
-    fromUser={userInfo}
-    toUser={targetUser}
-  />
-)}
-   
+      {showChatModal && targetUser && userInfo && (
+        <ChatModal
+          open={showChatModal}
+          onClose={() => setShowChatModal(false)}
+          fromUser={userInfo}
+          toUser={targetUser}
+        />
+      )}
     </div>
   );
 };

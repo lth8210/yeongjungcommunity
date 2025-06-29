@@ -1,5 +1,3 @@
-// src/components/NoticeList.js
-
 import { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
 import { ADMIN_UIDS } from '../config';
@@ -32,7 +30,6 @@ const NoticeList = () => {
     fetchNotices();
   }, []);
   
-  // 수정, 삭제 등 핸들러 함수들은 PostList.js, MeetingList.js와 원리가 동일합니다.
   const handleDelete = async (id) => {
     if (window.confirm("정말로 이 공지를 삭제하시겠습니까?")) {
       await deleteDoc(doc(db, "notices", id));
@@ -46,7 +43,6 @@ const NoticeList = () => {
       content: updatedContent,
     });
     setEditingId(null);
-    // 상태 직접 업데이트
     setNotices(notices.map(n => n.id === id ? { ...n, title: updatedTitle, content: updatedContent } : n));
   };
   
@@ -58,13 +54,10 @@ const NoticeList = () => {
 
   return (
     <div className="notice-list">
-      <h3>전체 공지</h3>
       {loading && <div>목록을 불러오는 중...</div>}
-      
       {notices.map(notice => (
         <div key={notice.id} className="notice-item">
           {editingId === notice.id && isAdmin ? (
-            // 수정 모드
             <div className="edit-form">
               <input type="text" value={updatedTitle} onChange={e => setUpdatedTitle(e.target.value)} />
               <textarea value={updatedContent} onChange={e => setUpdatedContent(e.target.value)}></textarea>
@@ -74,10 +67,36 @@ const NoticeList = () => {
               </div>
             </div>
           ) : (
-            // 일반 모드
             <>
               <h4>{notice.title}</h4>
               <p>{notice.content}</p>
+              {notice.files && notice.files.length > 0 && (
+                <div style={{ margin: '8px 0' }}>
+                  <b>첨부파일:</b>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', gap: 8 }}>
+                    {notice.files.map((file, idx) => (
+                      <li key={idx}>
+                        {file.type && file.type.startsWith('image/') ? (
+                          <img
+                            src={file.url}
+                            alt={file.originalName}
+                            style={{ width: 60, height: 60, objectFit: 'cover', borderRadius: 4, marginRight: 8 }}
+                          />
+                        ) : (
+                          <a
+                            href={file.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: '#1976d2', textDecoration: 'underline' }}
+                          >
+                            {file.originalName}
+                          </a>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <small>작성자: {notice.authorName}</small>
               {isAdmin && (
                 <div className="admin-actions">

@@ -1,5 +1,4 @@
-// ChatListPage.js
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../firebase';
 import {
@@ -13,67 +12,97 @@ import {
   updateDoc,
   deleteDoc,
   addDoc,
-  serverTimestamp
+  serverTimestamp,
+  getDocs,
 } from 'firebase/firestore';
+import CommunityCard from '../components/CommunityCard';
+import MessageModal from '../components/MessageModal';
+import ChatModal from '../components/ChatModal';
+import ChatCreateModal from '../components/ChatCreateModal';
 
 const ChatListPage = ({ userInfo }) => {
   const [chatRooms, setChatRooms] = useState([]);
   const [exitedRooms, setExitedRooms] = useState([]);
   const [invitations, setInvitations] = useState([]);
+  const [usersMap, setUsersMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [showCreateRoomModal, setShowCreateRoomModal] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
   const [maxParticipants, setMaxParticipants] = useState('');
+  const [selectedUserUids, setSelectedUserUids] = useState([]);
+  const [selectedUserNames, setSelectedUserNames] = useState([]);
+  const [selectedUserNicknames, setSelectedUserNicknames] = useState([]);
+  const [showMessageModal, setShowMessageModal] = useState(false);
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+
   const navigate = useNavigate();
   const currentUser = auth.currentUser;
+  const oneToOneRooms = chatRooms.filter(room => !room.isGroupChat);
+  const groupRooms = chatRooms.filter(room => room.isGroupChat);
 
-  // ✅ 내 채팅방 목록
+  useEffect(() => {
+    const fetchUsersMap = async () => {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const map = {};
+      usersSnap.docs.forEach(doc => {
+        const data = doc.data();
+        map[doc.id] = data.nickname || '닉네임없음';
+      });
+      setUsersMap(map);
+    };
+    fetchUsersMap();
+  }, []);
+
   useEffect(() => {
     if (!currentUser) return;
 
     const q = query(
-      collection(db, "chatRooms"),
-      where("participants", "array-contains", currentUser.uid),
-      orderBy("updatedAt", "desc")
+      collection(db, 'chatRooms'),
+      where('participants', 'array-contains', currentUser.uid),
+      orderBy('updatedAt', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      console.log('Firestore data snapshot:', querySnapshot.docs.map(doc => ({ id: doc.id, data: doc.data() })));
       const active = [];
       const exited = [];
 
       querySnapshot.forEach(docSnap => {
-        const room = docSnap.data();
+        const room = { id: docSnap.id, ...docSnap.data() };
         const myLastRead = room.lastRead?.[currentUser.uid]?.toDate();
         const lastMessageTime = room.updatedAt?.toDate();
         const hasUnread = myLastRead && lastMessageTime && lastMessageTime > myLastRead;
-        const roomObj = { id: docSnap.id, ...room, hasUnread };
+        room.hasUnread = hasUnread;
 
         if (room.leftUsers?.[currentUser.uid]) {
-          exited.push(roomObj);
+          exited.push(room);
         } else {
-          active.push(roomObj);
+          active.push(room);
         }
       });
 
       setChatRooms(active);
       setExitedRooms(exited);
       setLoading(false);
+    }, (error) => {
+      console.error('onSnapshot error:', error);
+      alert('채팅방 데이터를 불러오는 데 실패했습니다. 네트워크 연결을 확인하세요.');
     });
 
     return () => unsubscribe();
   }, [currentUser]);
 
-  // ✅ 초대 내역
   useEffect(() => {
     if (!currentUser) return;
 
-    const inviteRef = collection(db, "chatRooms");
+    const inviteRef = collection(db, 'chatRooms');
     const q = query(inviteRef);
     const unsubscribe = onSnapshot(q, async (roomsSnap) => {
       const results = [];
       for (const docSnap of roomsSnap.docs) {
         const roomId = docSnap.id;
-        const inviteDoc = doc(db, "chatRooms", roomId, "invitations", currentUser.uid);
+        const inviteDoc = doc(db, 'chatRooms', roomId, 'invitations', currentUser.uid);
         const inviteSnap = await getDoc(inviteDoc);
         if (inviteSnap.exists()) {
           results.push({ roomId, ...inviteSnap.data() });
@@ -86,10 +115,10 @@ const ChatListPage = ({ userInfo }) => {
   }, [currentUser]);
 
   const handleRejoinRoom = async (roomId) => {
-    const roomRef = doc(db, "chatRooms", roomId);
+    const roomRef = doc(db, 'chatRooms', roomId);
     try {
       const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) return alert("채팅방이 존재하지 않습니다.");
+      if (!roomSnap.exists()) return alert('채팅방이 존재하지 않습니다.');
 
       const roomData = roomSnap.data();
 
@@ -98,72 +127,153 @@ const ChatListPage = ({ userInfo }) => {
         participantNames: [...(roomData.participantNames || []), userInfo.name],
         participantNicknames: [...(roomData.participantNicknames || []), userInfo.nickname],
         [`leftUsers.${currentUser.uid}`]: false,
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
       });
 
-      await deleteDoc(doc(db, "chatRooms", roomId, "invitations", currentUser.uid));
-      alert("채팅방에 참여했습니다.");
+      await deleteDoc(doc(db, 'chatRooms', roomId, 'invitations', currentUser.uid));
+      alert('채팅방에 참여했습니다.');
       navigate(`/chat/${roomId}`);
     } catch (err) {
-      console.error("참여 오류:", err);
-      alert("참여에 실패했습니다.");
+      console.error('참여 오류:', err);
+      alert('참여에 실패했습니다.');
     }
   };
 
-  // handleCreateFreeRoom 함수 내부 수정
-const handleCreateFreeRoom = async () => {
-  if (!newRoomName.trim()) return alert("채팅방 이름을 입력해주세요.");
-  // 인원 제한 체크
-  if (maxParticipants && isNaN(Number(maxParticipants))) return alert("최대 인원은 숫자로 입력하세요!");
+  const handleCreateFreeRoom = async () => {
+  if (!newRoomName.trim()) return alert('채팅방 이름을 입력해주세요.');
+  if (maxParticipants && isNaN(Number(maxParticipants))) return alert('최대 인원은 숫자로 입력하세요!');
+
+  const participants = [currentUser.uid];
+  const participantNames = [userInfo.name];
+  const participantNicknames = [userInfo.nickname];
 
   try {
-    const roomRef = await addDoc(collection(db, "chatRooms"), {
+    const roomRef = await addDoc(collection(db, 'chatRooms'), {
       roomName: newRoomName,
-      maxParticipants: maxParticipants ? Number(maxParticipants) : null, // 인원 제한 필드 추가
+      maxParticipants: maxParticipants ? Number(maxParticipants) : null,
       createdBy: currentUser.uid,
-      participantNames: [userInfo.name],
-      participantNicknames: [userInfo.nickname],
-      participants: [currentUser.uid],
+      participantNames,
+      participantNicknames,
+      participants,
       leftUsers: {},
       lastRead: { [currentUser.uid]: new Date() },
-      updatedAt: serverTimestamp()
+      updatedAt: serverTimestamp(),
     });
     setShowCreateRoomModal(false);
     setNewRoomName('');
     setMaxParticipants('');
+    // 참여자 선택 관련 상태 모두 삭제
     navigate(`/chat/${roomRef.id}`);
   } catch (err) {
-    console.error("채팅방 생성 오류:", err);
-    alert("채팅방 생성에 실패했습니다.");
+    console.error('채팅방 생성 오류:', err);
+    alert('채팅방 생성에 실패했습니다.');
   }
 };
 
+  const handleMessage = (applicant) => {
+    setSelectedUser(applicant);
+    setShowMessageModal(true);
+  };
+
+  const handleChat = (applicant) => {
+    setSelectedUser(applicant);
+    setShowChatModal(true);
+  };
+
+  const sendMessage = async (toUid, messageText) => {
+    const ids = [currentUser.uid, toUid].sort();
+    const roomId = ids.join('_');
+    return addDoc(collection(db, 'directChats', roomId, 'messages'), {
+      text: messageText,
+      createdAt: serverTimestamp(),
+      uid: currentUser.uid,
+      userName: userInfo.nickname || userInfo.email || userInfo.name || '',
+      to: toUid,
+      from: currentUser.uid,
+    });
+  };
+
+  const handleEnterRoom = (roomId) => {
+    console.log('Navigating to chat room with id:', roomId);
+    if (!roomId) {
+      console.error('roomId is undefined');
+      alert('채팅방 ID가 올바르지 않습니다.');
+      return;
+    }
+    navigate(`/chat/${roomId}`);
+  };
+
   if (loading) return <div className="loading-screen">채팅방 목록을 불러오는 중...</div>;
 
+  const getApplicantObjects = (uids) =>
+    (uids || []).map(uid => ({
+      uid,
+      nickname: usersMap[uid] || '닉네임없음',
+    }));
+
   return (
-    <div className="chat-list-page">
+    <div className="chat-list-page container">
       <h2>채팅</h2>
       <div className="chat-sections-container" style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
         <div className="card chat-section" style={{ flex: 1, minWidth: '280px', background: '#fff', borderRadius: '10px', padding: '16px', boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }}>
           <h3>내 채팅방 목록</h3>
           <ul style={{ padding: 0, listStyle: 'none' }}>
-            {chatRooms.map(room => (
-              <li
-                key={room.id}
-                onClick={() => navigate(`/chat/${room.id}`)}
-                style={{
-                  background: '#fff',
-                  marginBottom: '8px',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                  cursor: 'pointer'
-                }}
-              >
-                <strong>{room.roomName}</strong>
-                <div style={{ fontSize: '12px', color: '#666' }}>{room.participants.length}명 참여중</div>
-              </li>
-            ))}
+            {oneToOneRooms.length > 0 && (
+              <>
+                <h4 style={{ margin: '12px 0 4px 0', color: '#1976d2' }}>1:1 채팅방</h4>
+                {oneToOneRooms.map(room => {
+                  const otherUid = room.participants.find(uid => uid !== currentUser.uid);
+                  const otherName = (room.participantNicknames && room.participantNicknames[room.participants.indexOf(otherUid)]) || usersMap[otherUid] || '닉네임없음';
+                  return (
+                    <li key={room.id} style={{ background: '#fff', marginBottom: '8px', padding: '12px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', cursor: 'pointer' }}>
+                      <CommunityCard
+                        id={room.id}
+                        title={otherName}
+                        content={room.lastMessage || ''}
+                        category="1:1 채팅"
+                        status={room.hasUnread ? 'unread' : 'read'}
+                        applicants={getApplicantObjects(room.participants)}
+                        authorName={otherName}
+                        currentUser={currentUser}
+                        onEnterRoom={() => handleEnterRoom(room.id)}
+                        onMessage={handleMessage}
+                        onChat={handleChat}
+                        extraFields={<div style={{ fontSize: 12, color: '#666' }}>1:1 대화</div>}
+                        isChatRoom={true}
+                        loading={loading} // Pass loading prop
+                      />
+                    </li>
+                  );
+                })}
+              </>
+            )}
+
+            {groupRooms.length > 0 && (
+  <>
+    <h4 style={{ margin: '16px 0 4px 0', color: '#1976d2' }}>그룹 채팅방</h4>
+    {groupRooms.map(room => (
+      <li key={room.id} style={{ background: '#fff', marginBottom: '8px', padding: '12px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', cursor: 'pointer' }}>
+        <CommunityCard
+          id={room.id} // ✅ 반드시 chatRooms의 id! (Firestore 문서 id)
+          isGroupChat={room.isGroupChat} // ✅ 그룹채팅방 여부
+          title={room.roomName}
+          content={room.lastMessage || ''}
+          category="그룹채팅"
+          status={room.hasUnread ? 'unread' : 'read'}
+          applicants={getApplicantObjects(room.participants)}
+          authorName={usersMap[room.createdBy] || '익명'}
+          currentUser={currentUser}
+          onEnterRoom={() => handleEnterRoom(room.id)}
+          onMessage={handleMessage}
+          onChat={handleChat}
+          extraFields={<div style={{ fontSize: 12, color: '#666' }}>{room.participants.length}명 참여중</div>}
+          isChatRoom={true}
+          loading={loading}
+        />
+      </li>
+    ))}
+  </>
+)}
           </ul>
 
           {exitedRooms.length > 0 && (
@@ -204,34 +314,30 @@ const handleCreateFreeRoom = async () => {
       </div>
 
       {showCreateRoomModal && (
-  <div className="modal-overlay">
-    <div className="modal-content">
-      <h3>자유 채팅방 만들기</h3>
-
-      {/* 채팅방 이름 입력 */}
-      <input
-        type="text"
-        placeholder="채팅방 이름 입력"
-        value={newRoomName}
-        onChange={(e) => setNewRoomName(e.target.value)}
-      />
-
-      <input
-  type="number"
-  placeholder="최대 인원 수 (예: 10, 비워두면 무제한)"
-  value={maxParticipants}
-  onChange={(e) => setMaxParticipants(e.target.value)}
-  style={{ marginTop: '8px', width: '100%' }}
-/>
-
-      {/* 버튼 */}
-      <div style={{ marginTop: '10px' }}>
-        <button onClick={handleCreateFreeRoom}>생성</button>
-        <button onClick={() => setShowCreateRoomModal(false)} style={{ marginLeft: '8px' }}>취소</button>
-      </div>
-    </div>
-  </div>
+  <ChatCreateModal
+    isOpen={showCreateRoomModal}
+    onRequestClose={() => setShowCreateRoomModal(false)}
+    userInfo={userInfo}
+  />
 )}
+
+      {showMessageModal && selectedUser && (
+        <MessageModal
+          open={showMessageModal}
+          onClose={() => setShowMessageModal(false)}
+          fromUser={userInfo}
+          toUser={selectedUser}
+          onSend={sendMessage}
+        />
+      )}
+      {showChatModal && selectedUser && (
+        <ChatModal
+          open={showChatModal}
+          onClose={() => setShowChatModal(false)}
+          fromUser={userInfo}
+          toUser={selectedUser}
+        />
+      )}
     </div>
   );
 };

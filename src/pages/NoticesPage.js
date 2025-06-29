@@ -1,5 +1,3 @@
-// src/pages/NoticesPage.js
-
 import { useState } from 'react';
 import { auth } from '../firebase';
 import { ADMIN_UIDS } from '../config';
@@ -18,17 +16,15 @@ const NoticesPage = ({ userInfo }) => {
   return (
     <div className="notices-page">
       <h2>공지사항</h2>
-      
-      {isAdmin && (
-        <div className="form-section">
-          <h3>새 공지 작성</h3>
-          <NoticeForm onNoticeAdded={handleNoticeAdded} userInfo={userInfo} />
+      <div className="content-wrapper">
+        {isAdmin && (
+          <div className="form-section">
+            <NoticeForm onNoticeAdded={handleNoticeAdded} userInfo={userInfo} />
+          </div>
+        )}
+        <div className="list-section">
+          <NoticeList key={refreshKey} userInfo={userInfo} />
         </div>
-      )}
-      
-      <div className="list-section">
-        <h3>전체 공지</h3>
-        <NoticeList key={refreshKey} userInfo={userInfo} />
       </div>
     </div>
   );

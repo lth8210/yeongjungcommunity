@@ -1,6 +1,3 @@
-import React from 'react';
-// src/pages/ProposalsPage.js
-
 import { useState } from 'react';
 import ProposalForm from '../components/ProposalForm';
 import ProposalList from '../components/ProposalList';
@@ -19,8 +16,7 @@ const ProposalsPage = ({ userInfo }) => {
         제안 이후 10명 이상 주민의 참여 댓글과 동의 여부에 따라 진행 여부를 검토합니다.</p>
 
       <div className="form-section">
-        <h3>새로운 제안 작성하기</h3>
-        <ProposalForm onProposalAdded={handleProposalAdded} userInfo={userInfo} />
+        <ProposalForm onProposalAdded={handleProposalAdded} userInfo={userInfo} /> {/* <h3> 제거 */}
       </div>
       
       <div className="list-section">
